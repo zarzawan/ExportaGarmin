@@ -9,16 +9,17 @@ No Garmin developer API key required. Under the hood this uses the
 [python-garminconnect](https://github.com/cyberjunky/python-garminconnect)
 library, which logs in through the same SSO flow as the Garmin website.
 
-## Personal Windows edition
+## Edición personal para Windows
 
-This fork includes `GarminLauncher.exe`, a simple Windows interface with:
+Esta versión incluye `GarminLauncher.exe`, una interfaz sencilla para Windows
+con:
 
-- an exact start-date selector
-- incremental downloads backed by the existing export cache
-- one stable output file at `export/managed/garmin_actual.txt`
-- safe replacement of the output only after a successful export
+- selector de fecha inicial exacta
+- descargas incrementales respaldadas por la caché de exportación
+- un único archivo estable en `export/managed/garmin_actual.txt`
+- sustitución segura del archivo únicamente después de una exportación correcta
 
-For a new Windows installation, clone this repository and run:
+Para instalarlo en otro equipo Windows, clona este repositorio y ejecuta:
 
 ```powershell
 git clone https://github.com/zarzawan/garmin-data-export.git
@@ -26,20 +27,20 @@ cd garmin-data-export
 powershell -ExecutionPolicy Bypass -File .\Setup-Windows.ps1
 ```
 
-The setup script installs missing Python/.NET prerequisites with `winget`,
-creates `.venv`, installs the tested dependency lock, builds the solution,
-and publishes `GarminLauncher.exe` in the repository root.
+El script de preparación instala con `winget` los requisitos de Python y .NET
+que falten, crea `.venv`, instala las versiones de dependencias verificadas,
+compila la solución y genera `GarminLauncher.exe` en la raíz del repositorio.
 
-The launcher never stores Garmin credentials. Authentication tokens remain
-in `~/.garminconnect`, outside the repository. If this is a new PC, perform
-the one-time login after setup:
+El lanzador nunca guarda las credenciales de Garmin. Los tokens de
+autenticación permanecen en `~/.garminconnect`, fuera del repositorio. En un
+equipo nuevo, inicia sesión una sola vez después de la preparación:
 
 ```powershell
 $env:PATH = "$PWD\.venv\Scripts;$env:PATH"
 dotnet run -- --login
 ```
 
-Then double-click `GarminLauncher.exe`.
+Después, haz doble clic en `GarminLauncher.exe`.
 
 ## What it exports
 
