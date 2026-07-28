@@ -86,6 +86,9 @@ python garmin_export.py --all --no-cache
 # full year, more activities
 python garmin_export.py --days 365 --activities 500
 
+# everything from a chosen date
+python garmin_export.py --start-date 2025-01-01
+
 # go slower if you're worried about rate limits
 python garmin_export.py --days 365 --delay 1.0
 
@@ -216,6 +219,7 @@ Requires Python 3.7+ with dependencies installed (`pip install -r requirements.t
 | `--all` | | Export complete history (auto-detects start date) |
 | `--days N` | 30 | How many days of daily health data to pull |
 | `--activities N` | 100 | Max number of activities to export |
+| `--start-date YYYY-MM-DD` | | Export from an exact date, including all activities in the range |
 | `--output DIR` | ./export | Where to write the file |
 | `--delay SEC` | 0.15 | Base delay between API calls (seconds) |
 | `--no-cache` | | Re-fetch everything, ignore cached data |

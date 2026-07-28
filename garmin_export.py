@@ -609,12 +609,14 @@ class ExportCache:
 class GarminExporter:
     def __init__(self, api: Garmin, out_dir: Path, days: int, max_activities: int,
                  fetch_all: bool = False, cache: Optional[ExportCache] = None,
-                 update_mode: bool = False):
+                 update_mode: bool = False,
+                 explicit_start_date: Optional[date] = None):
         self.api = api
         self.out = out_dir
         self.max_activities = max_activities
         self.fetch_all = fetch_all
         self.update_mode = update_mode
+        self.explicit_start_date = explicit_start_date
         self.cache = cache or ExportCache(out_dir, enabled=False)
         self.today = date.today()
         self.errors: list[str] = []
@@ -632,11 +634,15 @@ class GarminExporter:
             else:
                 log.warning("No previous export found -- falling back to --days")
                 self.start_date = self.today - timedelta(days=days)
+        elif explicit_start_date is not None:
+            self.start_date = explicit_start_date
         elif fetch_all:
             self.start_date = self._detect_start_date()
         else:
             self.start_date = self.today - timedelta(days=days)
         self.days = (self.today - self.start_date).days
+        if explicit_start_date is not None:
+            self.days += 1  # An explicit range includes the selected start date.
 
     def _find_latest_export_end_date(self) -> Optional[date]:
         """Scan output directory for the most recent export and parse its end date."""
@@ -735,6 +741,9 @@ class GarminExporter:
         if self.fetch_all and not self.update_mode:
             log.info(f"Mode: --all (fetching complete history)")
             log.info(f"Max activities: unlimited")
+        elif self.explicit_start_date is not None:
+            log.info(f"Mode: explicit start date ({self.explicit_start_date})")
+            log.info("Activities: all in selected date range")
         else:
             log.info(f"Max activities: {self.max_activities}")
         print()
@@ -749,7 +758,10 @@ class GarminExporter:
             self.md.append("Garmin Connect Data Export\n")
             self.md.append(f"Exported: {now.isoformat()}")
             self.md.append(f"Date range: {self.start_date} to {self.today} ({self.days} days)")
-            self.md.append(f"Max activities: {self.max_activities}")
+            if self.explicit_start_date is not None:
+                self.md.append("Activities: all in selected date range")
+            else:
+                self.md.append(f"Max activities: {self.max_activities}")
         if _compact_mode:
             self.md.append(f"Format: compact (nulls stripped, single-line JSON, "
                            f"activity time-series omitted, daily data downsampled to hourly)\n")
@@ -1221,7 +1233,7 @@ class GarminExporter:
     def export_activities(self):
         self.md.append("\nActivities\n")
 
-        if self.fetch_all or self.update_mode:
+        if self.fetch_all or self.update_mode or self.explicit_start_date is not None:
             activities = safe_call(
                 self.api.get_activities_by_date,
                 self.start_date.isoformat(), self.today.isoformat(), None,
@@ -1833,6 +1845,7 @@ Examples:
   python garmin_export.py --all --split             # Split into files for NotebookLM upload
   python garmin_export.py --update                  # Export only new data since last export
   python garmin_export.py --all --no-cache          # Full re-fetch, ignore cache
+  python garmin_export.py --start-date 2025-01-01   # Everything from a chosen date
   python garmin_export.py --days 365                # Full year of daily health
   python garmin_export.py --days 90 --activities 500
   python garmin_export.py --delay 1.0               # Slower pace (safer)
@@ -1847,6 +1860,8 @@ Authentication (one-time setup):
     parser.add_argument("--all", action="store_true", help="Export complete history (auto-detects how far back to go)")
     parser.add_argument("--days", type=int, default=30, help="Days of daily health data (default: 30)")
     parser.add_argument("--activities", type=int, default=100, help="Max activities to export (default: 100)")
+    parser.add_argument("--start-date", type=str, default=None,
+                        help="Export from this date (YYYY-MM-DD), including all activities in the range")
     parser.add_argument("--output", type=str, default="export", help="Output directory (default: export)")
     parser.add_argument("--tokenstore", type=str, default=None, help="Token storage path")
     parser.add_argument("--delay", type=float, default=0.15, help="Base delay between API calls in seconds (default: 0.15)")
@@ -1861,6 +1876,17 @@ Authentication (one-time setup):
     parser.add_argument("--verbose", action="store_true", help="Debug logging")
 
     args = parser.parse_args()
+
+    explicit_start_date = None
+    if args.start_date:
+        try:
+            explicit_start_date = date.fromisoformat(args.start_date)
+        except ValueError:
+            parser.error("--start-date must use YYYY-MM-DD format")
+        if explicit_start_date > date.today():
+            parser.error("--start-date cannot be in the future")
+        if args.all or args.update:
+            parser.error("--start-date cannot be combined with --all or --update")
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -1910,7 +1936,8 @@ Authentication (one-time setup):
     exporter = GarminExporter(api, out, args.days, args.activities,
                               fetch_all=getattr(args, 'all', False),
                               cache=cache,
-                              update_mode=_update_mode)
+                              update_mode=_update_mode,
+                              explicit_start_date=explicit_start_date)
     try:
         exporter.run()
     except KeyboardInterrupt:

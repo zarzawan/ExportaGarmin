@@ -45,6 +45,7 @@ Desktop.ini
 # === .NET ===
 bin/
 obj/
+GarminLauncher.exe
 *.user
 *.suo
 *.userprefs
