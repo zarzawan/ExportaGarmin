@@ -9,6 +9,38 @@ No Garmin developer API key required. Under the hood this uses the
 [python-garminconnect](https://github.com/cyberjunky/python-garminconnect)
 library, which logs in through the same SSO flow as the Garmin website.
 
+## Personal Windows edition
+
+This fork includes `GarminLauncher.exe`, a simple Windows interface with:
+
+- an exact start-date selector
+- incremental downloads backed by the existing export cache
+- one stable output file at `export/managed/garmin_actual.txt`
+- safe replacement of the output only after a successful export
+
+For a new Windows installation, clone this repository and run:
+
+```powershell
+git clone https://github.com/zarzawan/garmin-data-export.git
+cd garmin-data-export
+powershell -ExecutionPolicy Bypass -File .\Setup-Windows.ps1
+```
+
+The setup script installs missing Python/.NET prerequisites with `winget`,
+creates `.venv`, installs the tested dependency lock, builds the solution,
+and publishes `GarminLauncher.exe` in the repository root.
+
+The launcher never stores Garmin credentials. Authentication tokens remain
+in `~/.garminconnect`, outside the repository. If this is a new PC, perform
+the one-time login after setup:
+
+```powershell
+$env:PATH = "$PWD\.venv\Scripts;$env:PATH"
+dotnet run -- --login
+```
+
+Then double-click `GarminLauncher.exe`.
+
 ## What it exports
 
 Everything. Every API response is dumped as complete JSON, nothing
