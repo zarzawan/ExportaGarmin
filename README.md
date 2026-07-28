@@ -1,298 +1,231 @@
-# Garmin Connect Data Export
+# Exportador de datos de Garmin para Windows
 
-Pulls your health and fitness data from Garmin Connect and saves it as
-a plain text file with complete JSON data blocks. Designed for uploading
-to LLM tools like NotebookLM, ChatGPT, and Claude. Also useful for
-local backup or having your own numbers outside the Garmin app.
+Esta edición permite descargar una copia local de tus datos de Garmin Connect
+mediante una ventana sencilla. Puedes elegir una fecha inicial y actualizar
+posteriormente la exportación sin volver a descargarlo todo.
 
-No Garmin developer API key required. Under the hood this uses the
-[python-garminconnect](https://github.com/cyberjunky/python-garminconnect)
-library, which logs in through the same SSO flow as the Garmin website.
+La aplicación mantiene la capa .NET del proyecto original y utiliza Python
+internamente para comunicarse con Garmin Connect.
 
-## Edición personal para Windows
+> [!IMPORTANT]
+> Este es un proyecto personal y no oficial. No pertenece a Garmin ni está
+> respaldado por Garmin. Utilízalo únicamente con tu propia cuenta.
 
-Esta versión incluye `GarminLauncher.exe`, una interfaz sencilla para Windows
-con:
+## Instalación fácil
 
-- selector de fecha inicial exacta
-- descargas incrementales respaldadas por la caché de exportación
-- un único archivo estable en `export/managed/garmin_actual.txt`
-- sustitución segura del archivo únicamente después de una exportación correcta
+Estos pasos están pensados para una persona sin conocimientos informáticos.
+Solo necesitas un PC con Windows 11, conexión a Internet y acceso a este
+repositorio privado de GitHub.
 
-Para instalarlo en otro equipo Windows, clona este repositorio y ejecuta:
+### 1. Descargar el programa
 
-```powershell
-git clone https://github.com/zarzawan/garmin-data-export.git
-cd garmin-data-export
-powershell -ExecutionPolicy Bypass -File .\Setup-Windows.ps1
+1. Inicia sesión en GitHub con la cuenta que tiene acceso a este repositorio.
+2. Abre `https://github.com/zarzawan/garmin-data-export`.
+3. Pulsa el botón verde **Code**.
+4. Pulsa **Download ZIP**.
+5. Abre la carpeta **Descargas** de Windows.
+6. Pulsa con el botón derecho sobre el archivo ZIP y elige **Extraer todo**.
+7. Entra en la carpeta que Windows acaba de crear.
+
+Es importante extraer el ZIP. El instalador no funcionará correctamente si se
+ejecuta desde dentro del archivo comprimido.
+
+### 2. Instalar
+
+1. Haz doble clic en `Instalar.bat`.
+2. Si Windows muestra una advertencia, revisa que el archivo procede de tu
+   repositorio privado. Después pulsa **Más información** y
+   **Ejecutar de todas formas**.
+3. Deja abierta la ventana negra mientras termina la instalación.
+4. Acepta las ventanas de Windows que soliciten permiso para instalar Python o
+   .NET.
+
+El instalador se encarga automáticamente de:
+
+- instalar Python 3.11 si falta;
+- instalar el SDK de .NET 11 si falta;
+- crear el entorno privado `.venv`;
+- instalar las dependencias comprobadas;
+- compilar la aplicación;
+- crear `GarminLauncher.exe`.
+
+La primera instalación puede tardar varios minutos.
+
+### 3. Iniciar sesión en Garmin
+
+Si este PC todavía no tiene una sesión guardada, el instalador te preguntará
+si quieres iniciar sesión.
+
+1. Pulsa **Intro** para continuar.
+2. Escribe tu correo de Garmin y pulsa **Intro**.
+3. Escribe tu contraseña y pulsa **Intro**. La contraseña no aparecerá en
+   pantalla mientras escribes; es normal.
+4. Si utilizas verificación en dos pasos, escribe el código de tu aplicación
+   de autenticación.
+
+Las credenciales se envían directamente al inicio de sesión de Garmin. El
+proyecto no las guarda. Los tokens de sesión quedan fuera del repositorio, en:
+
+```text
+C:\Users\TU_USUARIO\.garminconnect
 ```
 
-El script de preparación instala con `winget` los requisitos de Python y .NET
-que falten, crea `.venv`, instala las versiones de dependencias verificadas,
-compila la solución y genera `GarminLauncher.exe` en la raíz del repositorio.
+No compartas nunca tu contraseña, código MFA, tokens ni la carpeta
+`.garminconnect`.
 
-El lanzador nunca guarda las credenciales de Garmin. Los tokens de
-autenticación permanecen en `~/.garminconnect`, fuera del repositorio. En un
-equipo nuevo, inicia sesión una sola vez después de la preparación:
+### 4. Abrir el programa
+
+Cuando el instalador indique que ha terminado:
+
+1. Cierra la ventana del instalador.
+2. Haz doble clic en `GarminLauncher.exe`.
+3. Elige en **Descargar desde** la fecha inicial que quieres conservar.
+4. Pulsa **Crear o actualizar**.
+5. No cierres la ventana hasta que aparezca
+   **Actualización completada**.
+
+## Uso habitual
+
+En las siguientes ocasiones solo tienes que:
+
+1. abrir `GarminLauncher.exe`;
+2. mantener o cambiar la fecha inicial;
+3. pulsar **Crear o actualizar**.
+
+La aplicación reutiliza una caché local. Solo consulta lo que todavía no se ha
+descargado y reconstruye un único archivo actualizado:
+
+```text
+export\managed\garmin_actual.txt
+```
+
+Los botones **Abrir carpeta** y **Abrir archivo** permiten encontrar el
+resultado sin navegar manualmente por las carpetas.
+
+## Qué datos descarga
+
+Según los datos disponibles en tu cuenta, puede incluir:
+
+- perfil, configuración y dispositivos;
+- pasos, frecuencia cardiaca, sueño, estrés, batería corporal, SpO2, HRV y
+  respiración;
+- actividades, vueltas, zonas, ejercicios, tiempo y series temporales;
+- peso y composición corporal;
+- métricas y preparación de entrenamiento;
+- objetivos, récords y logros;
+- tendencias semanales;
+- golf, equipamiento, planes y entrenamientos;
+- hidratación, nutrición y salud femenina.
+
+Los bloques JSON conservan los nombres técnicos originales que devuelve la API
+de Garmin. No se traducen ni se modifican para evitar perder información.
+
+## Dónde se guarda cada cosa
+
+| Contenido | Ubicación |
+|---|---|
+| Archivo que debes utilizar | `export\managed\garmin_actual.txt` |
+| Caché incremental | `export\.cache\` |
+| Sesión de Garmin | `%USERPROFILE%\.garminconnect\` |
+| Preferencia de fecha del lanzador | `%LOCALAPPDATA%\GarminDataExportLauncher\settings.json` |
+| Entorno de Python | `.venv\` |
+
+Los datos personales, la caché, los tokens y `.venv` están excluidos de Git.
+
+## Volver a instalar o reparar
+
+Puedes ejecutar `Instalar.bat` otra vez si:
+
+- borraste accidentalmente `GarminLauncher.exe`;
+- se actualizó Windows;
+- la aplicación dejó de abrirse;
+- quieres volver a compilar la versión descargada.
+
+Antes de hacerlo, cierra `GarminLauncher.exe`.
+
+El instalador conserva la caché y las exportaciones existentes. No borra tus
+datos.
+
+## Problemas frecuentes
+
+### La ventana se cierra demasiado rápido
+
+Ejecuta `Instalar.bat`, no `Setup-Windows.ps1`. El archivo BAT mantiene la
+ventana abierta para que puedas leer el error.
+
+### Windows bloquea el ejecutable
+
+El ejecutable es una compilación personal y no tiene una firma comercial.
+Comprueba que lo descargaste de tu repositorio privado antes de utilizar
+**Más información → Ejecutar de todas formas**.
+
+### Dice que no existe una sesión guardada
+
+Vuelve a ejecutar `Instalar.bat` y acepta iniciar sesión. También puedes abrir
+PowerShell dentro de la carpeta y ejecutar:
 
 ```powershell
 $env:PATH = "$PWD\.venv\Scripts;$env:PATH"
 dotnet run -- --login
 ```
 
-Después, haz doble clic en `GarminLauncher.exe`.
+### Garmin rechaza el inicio de sesión
 
-## What it exports
+- Comprueba el correo y la contraseña entrando primero en
+  `https://connect.garmin.com`.
+- Espera unos minutos si has realizado varios intentos.
+- Comprueba que el código MFA todavía no ha caducado.
 
-Everything. Every API response is dumped as complete JSON, nothing
-gets filtered or summarized, so you get every field Garmin returns
-including dates, timestamps, and metadata. If a category has no data
-for your account, it says so instead of silently skipping it.
+### La descarga se interrumpe
 
-- **Profile**: user info, settings, devices, alarms, activity types
-- **Daily health**: steps, heart rate, sleep, stress, body battery,
-  SpO2, HRV, respiration, intensity minutes, all-day events, lifestyle
-  logging. One section per day.
-- **Activities**: every activity with full summary, splits, HR/power
-  zones, exercise sets, weather, and complete time-series data.
-- **Body composition**: weight, BMI, body fat, muscle/bone mass,
-  weigh-ins (chunked yearly for long histories).
-- **Training metrics**: VO2 max, fitness age, training readiness,
-  lactate threshold, cycling FTP, hill/endurance scores, running
-  tolerance, race predictions.
-- **Goals and records**: personal records, earned badges, active and
-  past goals.
-- **Trends**: weekly aggregates (steps, stress, intensity minutes),
-  daily steps, floors, progress summaries, body battery trend.
-- **Golf**: scorecards, shot data per round.
-- **Gear**: equipment list, stats per item, activity type defaults.
-- **Training plans**: active and past plans with full details.
-- **Workouts**: saved workouts with full structure.
-- **Hydration**: daily fluid intake (per day, cached).
-- **Nutrition**: food logs, meals, nutrition settings (per day, cached).
-- **Women's health**: menstrual calendar, pregnancy summary.
+Abre de nuevo el lanzador y pulsa **Crear o actualizar**. La caché permite
+continuar sin repetir todo el trabajo.
 
-## Setup
+## Uso avanzado
 
-```
-pip install garminconnect garth
+No necesitas estos comandos para utilizar la ventana gráfica.
+
+Mostrar la ayuda:
+
+```powershell
+$env:PATH = "$PWD\.venv\Scripts;$env:PATH"
+dotnet run -- --help
 ```
 
-## First run
+Exportar desde una fecha concreta:
 
-You need to log in once. After that, tokens are cached locally for about
-a year and you won't be asked again.
-
-```
-python garmin_export.py --login
+```powershell
+dotnet run -- --start-date 2025-01-01 --compact
 ```
 
-It will ask for your Garmin email and password (sent directly to Garmin's
-servers, not stored by this tool). If you have MFA enabled it will prompt
-for the code too.
+Exportar todo el historial:
 
-If you'd rather not type credentials every time you set up a new machine,
-drop them in a `.env` file next to the script:
-
-```
-GARMIN_EMAIL=you@example.com
-GARMIN_PASSWORD=your-password
-```
-
-Or use environment variables (`GARMIN_EMAIL`, `GARMIN_PASSWORD`).
-
-## Usage
-
-```
-# defaults: last 30 days of health data, up to 100 activities
-python garmin_export.py
-
-# everything, goes back to your very first Garmin activity
-python garmin_export.py --all
-
-# resume an interrupted export (cache picks up where it stopped)
-python garmin_export.py --all
-
-# force a clean re-fetch
-python garmin_export.py --all --no-cache
-
-# full year, more activities
-python garmin_export.py --days 365 --activities 500
-
-# everything from a chosen date
-python garmin_export.py --start-date 2025-01-01
-
-# go slower if you're worried about rate limits
-python garmin_export.py --days 365 --delay 1.0
-
-# split into multiple files for LLM tools with word count limits
-python garmin_export.py --all --split
-
-# incremental update: only fetch data since last export
-python garmin_export.py --update
-```
-
-### Recommended workflow
-
-Do a full initial export once:
-
-```
-python garmin_export.py --all --split
-```
-
-Then use `--update` for incremental data going forward:
-
-```
-python garmin_export.py --update
-```
-
-Output goes into `export/` as a single timestamped plain text file, like
-`garmin_export_2026-03-22_162534.txt`.
-
-## Output format
-
-Everything lives in one `.txt` file. The structure uses plain text section
-headers with raw JSON data blocks (no markdown formatting, no code fences).
-This format was chosen because NotebookLM and other LLM tools have known
-issues parsing markdown files. Plain text with raw JSON works best for
-RAG indexing. By default, nothing is filtered, truncated, or summarized.
-
-## Compact mode
-
-A full `--all` export can be 150+ MB, which is too large for some LLM
-tools (NotebookLM, ChatGPT file upload, etc.). Use `--compact` to reduce
-the file size significantly:
-
-```
-python garmin_export.py --all --compact
-```
-
-What compact mode does:
-
-- Strips null, empty, and zero-value fields from all JSON
-- Uses single-line JSON instead of pretty-printed (saves whitespace)
-- Drops activity time-series data (second-by-second sensor readings);
-  summaries, splits, and zones are still included
-- Downsamples daily high-frequency data (heart rate, stress, sleep,
-  respiration) from per-minute readings to hourly averages
-- Each section becomes a single JSON block with a schema description
-
-The same cache is used for both modes. Compact mode just writes less data
-to the output file; it does not affect what gets cached or fetched.
-
-## Split mode (for LLM tools)
-
-Many LLM tools have per-source word count limits. NotebookLM caps at
-500,000 words per source, and other tools have similar restrictions.
-Use `--split` (implies `--compact`) to split the export into multiple
-files, each under the limit:
-
-```
-python garmin_export.py --all --split
-```
-
-This produces files like `garmin_export_..._part1of6.txt`. Each file
-includes its own header listing which sections it contains. Upload all
-files as separate sources.
-
-NotebookLM supports up to 50 sources per notebook, so even a multi-year
-export with 6-8 files fits easily. Other LLM tools that accept multiple
-file uploads benefit from the same approach. Smaller files stay within
-per-file token limits while preserving all data.
-
-## Update mode (incremental exports)
-
-After doing a full `--all --split` export, use `--update` to fetch only
-the data that has arrived since the last export:
-
-```
-python garmin_export.py --update
-```
-
-The tool finds the most recent export file(s) in the output directory,
-parses the end date, and sets the start date to one day before that (to
-catch any late-arriving data). It implies `--compact` and only includes
-per-day and per-activity sections: Daily Health, Activities, Hydration,
-and Nutrition. Sections that don't change (Profile, Body Composition,
-Training Metrics, Goals, Trends, Golf, Gear, Training Plans, Workouts,
-Women's Health) are skipped since they're already in the base export.
-
-Output filename: `garmin_export_YYYY-MM-DD_HHMMSS_compact_update.txt`
-
-If no previous export is found, it falls back to the `--days` default
-(30 days).
-
-## .NET project structure
-
-This is a .NET solution that wraps a Python export script. The Garmin
-Connect library (`python-garminconnect`) is Python-only, so the actual
-data fetching runs in Python. The .NET project provides the solution
-structure, build integration, and can be extended with C# tooling.
-
-To build and run:
-
-```
-dotnet build
-dotnet run
-```
-
-This invokes the Python script with default arguments. Pass additional
-flags after `--`:
-
-```
+```powershell
 dotnet run -- --all --split
 ```
 
-Requires Python 3.7+ with dependencies installed (`pip install -r requirements.txt`).
+Actualizar una exportación creada mediante la línea de comandos:
 
-## Options
+```powershell
+dotnet run -- --update
+```
 
-| Flag | Default | What it does |
-|------|---------|--------------|
-| `--all` | | Export complete history (auto-detects start date) |
-| `--days N` | 30 | How many days of daily health data to pull |
-| `--activities N` | 100 | Max number of activities to export |
-| `--start-date YYYY-MM-DD` | | Export from an exact date, including all activities in the range |
-| `--output DIR` | ./export | Where to write the file |
-| `--delay SEC` | 0.15 | Base delay between API calls (seconds) |
-| `--no-cache` | | Re-fetch everything, ignore cached data |
-| `--compact` | | Smaller output for LLM upload (see above) |
-| `--split` | | Split output into multiple files under 480K words each |
-| `--update` | | Export only new data since the last export (implies `--compact`) |
-| `--login` | | Just log in and cache tokens, then exit |
-| `--tokenstore DIR` | ~/.garminconnect | Where to store auth tokens |
-| `--verbose` | | Show debug output |
+## Seguridad
 
-When `--all` is used, `--days` and `--activities` are ignored. The tool
-finds your oldest activity and works backward from there.
+Nunca añadas a Git ni compartas:
 
-## Caching
+- `export\`;
+- `.env`;
+- `.garminconnect\`;
+- `.venv\`;
+- contraseñas, códigos MFA, cookies o tokens.
 
-Large exports (especially `--all` on multi-year accounts) can take a
-while. If the export gets interrupted, just run the same command again.
-The tool caches each day's health data, each activity, and each section
-as it goes. On re-run it only fetches what's not already in the cache.
+El archivo `.gitignore` bloquea estas rutas como medida adicional.
 
-Cache is permanent, it never invalidates or expires. Use `--no-cache`
-to force a full re-fetch from scratch, or just delete `export/.cache/`.
+## Proyecto original y licencia
 
-## Rate limiting
+Esta edición está basada en
+[`sirredbeard/garmin-data-export`](https://github.com/sirredbeard/garmin-data-export).
 
-The tool paces itself automatically. It starts at 0.15 seconds between
-calls, backs off if Garmin pushes back (429), and ramps back up when
-things calm down. Every 250 calls it takes a short breather. For big
-exports the delay adjusts on its own, but you can bump `--delay` to 1.0
-or higher if you want to play it safe.
-
-## Security
-
-The `.gitignore` keeps your data out of version control:
-- `export/` (your health data)
-- `.env` (credentials)
-- `.garminconnect/` (auth tokens)
-
-Don't commit any of those.
-
-## License
-
-[Apache 2.0](LICENSE).
+Se distribuye bajo la [licencia Apache 2.0](LICENSE). Garmin y Garmin Connect
+son marcas de sus respectivos propietarios.

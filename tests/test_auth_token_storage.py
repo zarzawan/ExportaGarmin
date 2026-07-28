@@ -25,7 +25,7 @@ class AuthTokenStorageTests(unittest.TestCase):
         native_client.dump.assert_called_once_with("tokens")
 
     def test_rejects_unknown_token_storage_api(self):
-        with self.assertRaisesRegex(RuntimeError, "token storage API not found"):
+        with self.assertRaisesRegex(RuntimeError, "no se encontró la función para guardar tokens"):
             _persist_auth_tokens(object(), Path("tokens"))
 
 
