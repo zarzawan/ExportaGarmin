@@ -1,260 +1,309 @@
-# AGENTS.md -- AI context for garmin-data-export
+# AGENTS.md — Contexto para asistentes de IA
 
-This file is for AI agents working on or consuming output from this project.
-For human setup instructions, see [README.md](README.md).
+Este archivo está dirigido a asistentes que trabajen sobre el proyecto o
+analicen sus exportaciones. Las instrucciones de instalación para personas
+están en [README.md](README.md).
 
-## What this project does
+## Qué hace el proyecto
 
-A single Python script (`garmin_export.py`) downloads all available health
-and fitness data from a user's Garmin Connect account and writes it as one
-plain text file with raw JSON data blocks. The output is designed for LLM
-consumption -- every API response is dumped as complete, unfiltered JSON.
-No markdown formatting is used; plain text headers separate sections.
+El script `garmin_export.py` descarga datos de salud y entrenamiento de una
+cuenta de Garmin Connect y los guarda como texto con bloques JSON.
 
-This format was specifically chosen for compatibility with NotebookLM and
-other LLM tools. Research found that .md files have known parsing bugs in
-NotebookLM's RAG indexer, and content inside code fences (```json) gets
-skipped. Plain .txt with raw JSON avoids both issues.
+Hay dos formatos:
 
-No official Garmin API key exists for personal use. The script authenticates
-through Garmin's SSO (same flow as the website) via the
-[python-garminconnect](https://github.com/cyberjunky/python-garminconnect)
-library, which wraps [garth](https://github.com/matin/garth) for OAuth.
+- El modo completo conserva las respuestas originales de Garmin.
+- El modo compacto crea objetos semánticos, reduce duplicados y elimina datos
+  privados para facilitar el análisis periódico con una IA.
 
-## Output file structure
+Los archivos son `.txt`, sin bloques de código Markdown. Esta decisión mejora
+la compatibilidad con NotebookLM y otras herramientas que fragmentan e
+indexan documentos.
 
-Each export produces a single file: `export/garmin_export_YYYY-MM-DD_HHMMSS.txt`
-Update exports use: `export/garmin_export_YYYY-MM-DD_HHMMSS_update.txt`
+Garmin no ofrece una API oficial para uso personal. El proyecto utiliza
+`python-garminconnect`, que reproduce las llamadas de Garmin Connect y delega
+el inicio de sesión OAuth en `garth`.
 
-The output uses plain text section headers and raw JSON (no markdown headings,
-no code fences, no bold/italic). This is intentional -- NotebookLM's RAG
-indexer has bugs with .md files and skips content inside code fences.
+## Estructura de la salida
 
-```
-Garmin Connect Data Export            -- title + metadata (date range, export time)
+La línea de comandos genera normalmente:
 
-Table of Contents                     -- numbered list with section names and descriptions;
-                                         notes that all data is raw JSON
-Profile                               -- section-level cache (fetched once, cached forever)
-Daily Health                          -- per-day: 13 endpoints fetched concurrently (4 threads)
-  2026-03-22                          -- one per day, newest first
-    Steps / Heart Rate / Sleep        -- each sub-section has a plain text title + raw JSON
-Activities                            -- per-activity cache; list then detail per item
-  Activity {id}                       -- summary, splits, zones, weather, time-series
-Body Composition                      -- chunked yearly API calls, section cache
-Training Metrics                      -- VO2max, FTP, hill/endurance scores, etc.
-Goals and Records                     -- PRs, badges, goals
-Trends                                -- weekly aggregates, daily steps, floors, progress
-Golf                                  -- list then scorecard + shots per round
-Gear                                  -- needs userProfileNumber; list then stats per item
-Training Plans                        -- list then detail per plan
-Workouts                              -- list then detail per workout
-Hydration                             -- per-day, fetched concurrently (4 threads)
-Nutrition                             -- per-day (3 calls/day), fetched concurrently
-Women's Health                        -- chunked date range + pregnancy summary
-
-Errors During Export                  -- only if any sections failed
+```text
+export/garmin_export_AAAA-MM-DD_HHMMSS.txt
 ```
 
-Empty sections contain: "No data available."
+El lanzador de Windows propone nombres comprensibles:
 
-## Architecture
+```text
+export/managed/garmin_datos_2026-01-01_a_2026-07-28.txt
+```
 
-### Single file, three classes
+Las actualizaciones creadas con `--update` añaden el sufijo `_update`.
 
-| Class | Purpose |
-|-------|---------|
-| `RateLimiter` | Thread-safe adaptive pacer. Starts at 0.15s delay, doubles on 429, decays on success. Forced 2s pause every 250 calls. |
-| `ExportCache` | Persistent JSON file cache under `export/.cache/`. Three namespaces: `daily/` (per-day), `activities/` (per-activity), `sections/` (whole-section blobs). Never invalidates -- only `--no-cache` or deleting `.cache/` forces re-fetch. |
-| `GarminExporter` | Orchestrator. Authenticates, iterates the sections list, writes plain text output, handles Ctrl-C gracefully (saves partial export). |
+El compacto semántico contiene estas secciones:
 
-### Concurrency model
+```text
+Export Metadata       Metadatos, intervalo, zona horaria y versión
+Profile               Edad, sexo, altura, unidades y reloj sin identidad
+Daily Health          Un registro semántico por día
+Blood Pressure        Solo mediciones reales
+Activities            Resúmenes, vueltas, zonas, sensaciones y equipamiento
+Body Composition      Peso y composición corporal con unidades explícitas
+Training Metrics      Métricas clasificadas por su relación con el intervalo
+Goals and Records     Récords y objetivos activos
+Gear                  Equipamiento y asociaciones con actividades
+Hydration             Solo registros reales
+Nutrition             Solo registros reales
+Weekly Summary        Totales calculados y distribución de pulso
+Data Quality          Ausencias, advertencias, conversiones y privacidad
+```
 
-- Daily health: `ThreadPoolExecutor(max_workers=4)` -- 13 endpoints per day fetched in parallel
-- Hydration: 4 days fetched concurrently (1 API call per day)
-- Nutrition: 4 days concurrently (3 API calls per day)
-- Activities: sequential (each activity has ~8 detail calls)
-- `RateLimiter.wait()` uses a `threading.Lock` so concurrent threads are still paced
+El modo completo añade todas las respuestas originales, incluidas tendencias,
+Golf, planes, entrenamientos guardados y salud femenina.
 
-### Caching strategy
+Las secciones vacías indican que no hay datos disponibles.
 
-Cache is **permanent**. Once a day/activity/section is cached, it is never
-re-fetched unless the user passes `--no-cache` or deletes the cache directory.
+## Arquitectura
 
-| Cache type | Key | Location |
-|------------|-----|----------|
-| Daily health | `YYYY-MM-DD` | `export/.cache/daily/YYYY-MM-DD.json` |
-| Hydration | `hydration_YYYY-MM-DD` | `export/.cache/daily/hydration_YYYY-MM-DD.json` |
-| Nutrition | `nutrition_YYYY-MM-DD` | `export/.cache/daily/nutrition_YYYY-MM-DD.json` |
-| Activity | `{activityId}` | `export/.cache/activities/{activityId}.json` |
-| Section | `{name}` | `export/.cache/sections/{name}.json` |
+### Un script y tres clases principales
 
-On re-run, only uncached items are fetched. This makes interrupted `--all`
-exports fully resumable -- just run the same command again.
+| Clase | Responsabilidad |
+|---|---|
+| `RateLimiter` | Regula de forma adaptativa y segura entre hilos las llamadas a Garmin. |
+| `ExportCache` | Guarda respuestas JSON originales por día, actividad o sección. |
+| `GarminExporter` | Autentica, ejecuta cada sección, crea la salida y conserva resultados parciales al interrumpir. |
 
-### Chunked date-range calls
+### Concurrencia
 
-Several Garmin endpoints reject date ranges longer than about one year with
-HTTP 400. The `_chunked_date_call()` helper breaks ranges into 365-day
-segments, calls each, and merges the list results. Used for: endurance score,
-running tolerance, weekly intensity minutes, hill score, body composition,
-weigh-ins, and menstrual calendar.
+- Salud diaria: hasta 4 llamadas simultáneas.
+- Hidratación: hasta 4 días simultáneos.
+- Nutrición: hasta 4 días, con 3 llamadas por día.
+- Actividades: procesamiento secuencial.
+- Todas las llamadas pasan por un único `RateLimiter` protegido con
+  `threading.Lock`.
 
-### Rate limiting details
+### Caché
 
-| Parameter | Value |
-|-----------|-------|
-| Base delay | 0.15s (configurable via `--delay`) |
-| On HTTP 429 | Double delay (max 10s), wait 60s, retry once |
-| On success streak (10+) | Gradually reduce delay toward base |
-| Every 250 calls | Forced 2s pause |
-| On general error | 1.2x delay bump |
+La caché se guarda bajo la carpeta de salida seleccionada:
 
-### Authentication
+| Tipo | Clave | Ubicación |
+|---|---|---|
+| Salud diaria | `AAAA-MM-DD` | `.cache/daily/AAAA-MM-DD.json` |
+| Hidratación | `hydration_AAAA-MM-DD` | `.cache/daily/` |
+| Nutrición | `nutrition_AAAA-MM-DD` | `.cache/daily/` |
+| Actividad | identificador de actividad | `.cache/activities/` |
+| Sección | nombre e intervalo cuando corresponde | `.cache/sections/` |
 
-- `garth` library handles Garmin SSO OAuth
-- Tokens cached in `~/.garminconnect/` (about 1 year lifetime)
-- Supports `.env` file or `GARMIN_EMAIL`/`GARMIN_PASSWORD` env vars
-- `--login` flag to authenticate without exporting
-- Friendly error messages for common failures (401, 403, 429, network errors)
+Los datos históricos permanecen en caché. En modo compacto se actualizan el
+resumen, detalle y equipamiento de las actividades de los últimos 14 días para
+recoger cambios o autoevaluaciones sincronizados con retraso.
 
-### Compact mode (`--compact`)
+Las secciones dependientes de fechas utilizan claves con inicio y fin. Así una
+respuesta de un intervalo nunca se reutiliza por error en otro.
 
-Reduces output file size from ~170 MB to roughly 10-20 MB for LLM upload.
-Applied at write time only -- the cache always stores full data.
+`--no-cache` fuerza una descarga nueva.
 
-What it does:
-- `_strip_empty()` recursively removes None, empty strings, empty lists/dicts
-- `_json()` uses `indent=None` (single-line) instead of `indent=2`
-- `_compact_daily()` downsamples high-frequency daily time-series (heart rate,
-  stress, sleep, respiration, HRV, body battery) to ~24 hourly data points.
-  `_downsample_timeseries()` handles both list-of-dicts (keyed by timestamp
-  field) and list-of-lists (`[[timestamp, value], ...]`) formats, since
-  Garmin returns different formats for different endpoints
-- Activity time-series (`details` key) is omitted entirely; summaries, splits,
-  and zones are kept
-- Each section becomes a single JSON block with a schema description
-- Output filename gets a `_compact` suffix
+### Intervalos largos
 
-### Split mode (`--split`)
+Algunos endpoints rechazan periodos superiores a aproximadamente un año. La
+función `_chunked_date_call()` divide el intervalo en bloques de 365 días y
+combina las listas resultantes. Se usa para composición corporal, pesajes,
+minutos de intensidad, puntuaciones de resistencia y colinas, tolerancia de
+carrera y calendario menstrual.
 
-Splits output into multiple files for NotebookLM's 500K word limit.
-Implies `--compact`. Applied at write time after the full export is built.
+### Regulación de llamadas
 
-What it does:
-- `_SPLIT_WORD_LIMIT = 480000` (safety margin under 500K)
-- Splits on section boundaries; oversized sections split by JSON keys/items
-- Each file gets its own header with a list of sections it contains
-- Output filenames: `..._split_part1of6.txt`, `..._split_part2of6.txt`, etc.
+| Parámetro | Valor |
+|---|---|
+| Espera inicial | 0,15 s, configurable con `--delay` |
+| Respuesta 429 | Duplica la espera, hasta 10 s; pausa 60 s y reintenta una vez |
+| Racha correcta | Reduce gradualmente la espera hacia la base |
+| Cada 250 llamadas | Pausa preventiva de 2 s |
+| Error general | Aumenta la espera un 20 % |
 
-### Update mode (`--update`)
+## Autenticación
 
-Exports only new data since the last export. Designed for incremental use
-after an initial `--all --split` base export.
+- `garth` gestiona el flujo SSO/OAuth de Garmin.
+- Los tokens quedan en `~/.garminconnect/`, fuera del repositorio.
+- Se admite `.env` o las variables `GARMIN_EMAIL` y `GARMIN_PASSWORD`.
+- `--login` autentica y sale sin exportar.
+- Nunca deben escribirse credenciales, MFA, cookies ni tokens en código,
+  pruebas, registros o documentación.
 
-How it works:
-- Scans the output directory for the most recent export file(s)
-- Parses the end date from that file's metadata
-- Sets start_date to 1 day before that end date (overlap for late-arriving data)
-- If no previous export is found, falls back to `--days` default (30 days)
+## Modo compacto (`--compact`)
 
-What it includes (all sections, section cache bypassed so new data is always fetched):
-- Profile, Daily Health, Activities, Body Composition, Training Metrics, Goals and Records,
-  Trends, Golf, Gear, Training Plans, Workouts, Hydration, Nutrition, Women's Health
+La transformación se realiza únicamente al escribir. La caché siempre conserva
+la respuesta original completa.
 
-Implies `--compact`. Output filename gets a `_update` suffix.
+El esquema actual es `2.1.1`.
 
-### NotebookLM compatibility notes
+Características:
 
-Based on extensive research (Reddit, official docs, community reports):
-- Official supported formats: txt, md, csv, pdf, docx, pptx, Google Docs/Sheets
-- Limits: 500K words per source, 200MB file size, 50 sources per notebook
-- Known bug: .md files have parsing issues in NotebookLM's RAG indexer
-- Content inside code fences (```json) gets skipped by the indexer
-- Plain .txt is fastest and most reliable for the AI to process
-- NotebookLM uses RAG (chunks documents, retrieves per query) -- it does NOT
-  read entire files at once
+- Nombres estables en `snake_case` y unidades explícitas.
+- Perfil reducido sin nombre, fecha de nacimiento exacta, identificadores,
+  números de serie, URL ni capacidades del dispositivo.
+- Un registro diario con recuperación, sueño y VFC resumidos.
+- Actividades unificadas desde `summary` y `detail.summaryDTO`.
+- Vueltas desde `splits.lapDTOs`, con `typed_splits` solo como alternativa.
+- Zonas de pulso y potencia, autoevaluación y equipamiento por actividad.
+- Métricas posteriores al final solicitado separadas en `current_snapshot`.
+- Secciones `Weekly Summary` y `Data Quality`.
+- Presión arterial, hidratación y nutrición solo cuando existen datos reales.
 
-## Lessons learned
+### Series temporales
 
-1. **No official Garmin API for personal use.** The `python-garminconnect`
-   library reverse-engineers the web API. Endpoints can change without notice.
+`--activity-details` conserva la máxima resolución disponible con columnas
+deportivas aprobadas y sin coordenadas.
 
-2. **Rate limits are real but undocumented.** HTTP 429 responses start after
-   sustained bursts. The adaptive rate limiter with exponential backoff handles
-   this well. Starting conservative (0.15s) and ramping down is safer than
-   starting fast.
+Los valores `null` de las matrices posicionales nunca se eliminan. Cada muestra
+se valida contra el número de descriptores antes de escribirse. Una fila
+malformada se omite y queda indicada en calidad de datos.
 
-3. **Some endpoints have a roughly one-year date range limit.** They return
-   400 (not 429) for longer ranges. Chunking into yearly segments solved this.
-   The body battery range endpoint (`/bodyBattery/reports/daily`) returns 400
-   for any date span and was removed entirely -- per-day data covers it.
+Los metadatos diferencian:
 
-4. **Cache everything, invalidate nothing.** Historical health data does not
-   change. Permanent caching makes multi-hour `--all` exports fully resumable
-   and makes re-exports near-instant. The only cost is disk space (about 1-2 KB
-   per cached day).
+```text
+activity_series_mode: none
+activity_series_mode: full
+```
 
-5. **Concurrent fetching needs thread-safe rate limiting.** Four threads hit
-   the API simultaneously, but all go through one `RateLimiter` with a lock.
-   This gives roughly 3-4x speedup while still respecting pacing.
+Ambas siguen siendo exportaciones compactas semánticas.
 
-6. **Graceful Ctrl-C matters for long exports.** The script catches
-   `KeyboardInterrupt` per-section, saves whatever was exported so far, and
-   notes the interruption. Cache is already persisted per-item, so nothing
-   is lost.
+Garmin puede usar grabación inteligente, por lo que la serie no garantiza un
+punto por segundo.
 
-7. **Garmin endpoints vary in structure.** Some are list+detail (activities,
-   golf, gear, workouts), some are per-day (daily health, hydration,
-   nutrition), some are single-call (profile, goals), and some need chunked
-   date ranges (trends, training metrics, body comp). Each pattern needs
-   its own caching strategy.
+### Unidades y normalizaciones
 
-8. **Not all accounts have all data.** Golf, women's health, nutrition, and
-   hydration may return empty or 404. The `safe_call()` wrapper catches all
-   errors and returns `None`. Sections with no data get a "No data available"
-   note instead of crashing.
+- `sleepNeed.actual` se convierte de minutos a segundos.
+- Los epochs de inicio y fin del sueño se interpretan explícitamente como
+  milisegundos UTC y se convierten a ISO 8601 con la zona IANA configurada.
+- La temperatura meteorológica se convierte de Fahrenheit a Celsius.
+- La temperatura directa del sensor se conserva como Celsius.
+- RPE `10..100` se convierte a `1..10`; los valores originales se mantienen
+  dentro de la autoevaluación.
+- La velocidad del endpoint conocido de umbral de lactato conserva el valor
+  original y documenta el factor aplicado.
+- Los valores cuya unidad no está confirmada permanecen como datos originales
+  y no generan conversiones engañosas.
 
-9. **Output size can be large.** A 3-year `--all` export produces around
-   170 MB of text. This is fine for LLMs with large context windows or
-   RAG systems that chunk by section headers.
+### Zona 0 de pulso
 
-10. **The Table of Contents is critical for AI parsing.** It tells the model
-    what sections exist, what each one contains, and that all data is raw JSON.
-    Without it, models may struggle to navigate a 170 MB file.
+La zona 0 representa únicamente tiempo con pulso válido por debajo de la zona
+1:
 
-11. **Plain text beats markdown for LLM tools.** NotebookLM has known bugs
-    with .md files and skips content inside code fences. Reddit users
-    universally recommend .txt for best results.
+```text
+zona 0 = duración con pulso válido - suma de zonas 1 a 5
+```
 
-12. **Garmin time-series data comes in two formats.** Some endpoints return
-    list-of-dicts (`[{"timestamp": ..., "value": ...}]`) while others
-    (heart rate, stress, body battery) return list-of-lists
-    (`[[timestamp, value], ...]`). Downsampling must handle both formats
-    or it silently skips data, leaving hundreds of points instead of ~24
-    hourly samples in compact mode.
+Los intervalos sin pulso se registran aparte. Nunca deben asignarse
+automáticamente a la zona 0.
 
-13. **Incremental exports need overlap.** When resuming from the last
-    export's end date, starting 1 day earlier catches data that arrived
-    late (e.g., sleep data that spans midnight, or syncs that happen
-    after the export ran). The slight duplication is worth the safety.
+### Zonas horarias
 
-## Dependencies
+`--timezone` acepta una zona IANA. En Windows, `Romance Standard Time` se
+normaliza a `Europe/Madrid`. El offset se calcula para la fecha histórica
+solicitada y respeta los cambios de horario.
 
-Only two PyPI packages (see `requirements.txt`):
+## Modo dividido (`--split`)
 
-- `garminconnect` -- Garmin Connect API wrapper
-- `garth` -- OAuth/SSO authentication library (pulled in by garminconnect)
+Activa el compacto y divide la salida para mantenerse por debajo de 500.000
+palabras por fuente de NotebookLM. El límite interno es 480.000.
 
-Python 3.7+ required (uses f-strings, `typing.Optional`, `pathlib`, etc.).
+Se divide por secciones. Si una sección es demasiado grande, se fragmenta por
+claves o elementos JSON. Los nombres usan:
 
-## Files
+```text
+_split_part1of6.txt
+```
 
-| File | Purpose |
-|------|---------|
-| `garmin_export.py` | The entire tool -- single file, no internal packages |
-| `requirements.txt` | `garminconnect` and `garth` |
-| `README.md` | Human-facing setup, usage, and options reference |
-| `AGENTS.md` | This file -- AI-facing architecture and context |
-| `.gitignore` | Blocks `export/`, `.env`, `.garminconnect/`, Python artifacts |
-| `LICENSE` | Apache 2.0 |
+## Modo actualización (`--update`)
+
+Busca la exportación más reciente, lee su fecha final y comienza un día antes
+para recoger datos sincronizados con retraso. Si no encuentra una exportación,
+utiliza el valor de `--days`.
+
+Activa automáticamente el modo compacto.
+
+## Intervalos explícitos y lanzador de Windows
+
+- `--start-date AAAA-MM-DD --end-date AAAA-MM-DD` selecciona un intervalo
+  inclusivo.
+- `--end-date` requiere una fecha inicial.
+- La fecha final no puede ser futura ni anterior a la inicial.
+- `--filename` solo admite un nombre dentro de `--output`, nunca una ruta.
+- El lanzador propone `garmin_datos_INICIO_a_FIN.txt`.
+- Repetir el mismo nombre sustituye solo ese archivo.
+- La presión arterial se consulta mediante
+  `get_blood_pressure(inicio, fin)`.
+
+## Privacidad
+
+El compacto excluye:
+
+- nombres y datos del propietario;
+- identificadores personales y de dispositivos;
+- números de serie;
+- coordenadas, polilíneas y ubicaciones;
+- URL e imágenes de perfil;
+- hábitos íntimos;
+- catálogos vacíos y estructuras duplicadas.
+
+La caché y las exportaciones contienen datos personales originales, por lo que
+`export/`, `.env`, `.garminconnect/` y `.venv/` deben permanecer en
+`.gitignore`.
+
+## Compatibilidad con herramientas de IA
+
+- El texto plano evita problemas conocidos de indexación de Markdown.
+- No se usan bloques de código JSON porque algunos indexadores los omiten.
+- NotebookLM admite hasta 500.000 palabras y 200 MB por fuente.
+- NotebookLM usa recuperación por fragmentos; no lee necesariamente el archivo
+  completo en cada pregunta.
+- El archivo compacto normal es el recomendado para revisiones semanales.
+- Las series completas solo convienen para intervalos cortos o sesiones
+  concretas.
+
+## Lecciones importantes
+
+1. Garmin no ofrece una API personal oficial; los endpoints pueden cambiar.
+2. Los límites de llamadas existen, aunque no están documentados.
+3. Algunos endpoints limitan el intervalo a aproximadamente un año.
+4. La caché permite reanudar exportaciones largas sin repetir llamadas.
+5. Las actividades recientes pueden cambiar después de sincronizarse.
+6. La regulación debe ser segura entre hilos.
+7. Cada familia de endpoints devuelve estructuras distintas.
+8. No todas las cuentas tienen Golf, nutrición, hidratación o salud femenina.
+9. Las exportaciones completas pueden ocupar cientos de megabytes.
+10. El índice de contenidos ayuda a una IA a orientarse.
+11. El texto plano suele funcionar mejor que Markdown para RAG.
+12. Las series de Garmin pueden ser listas de objetos o matrices posicionales.
+13. Una actualización necesita solapamiento para recoger datos tardíos.
+14. Quitar un `null` posicional desplaza todas las columnas posteriores.
+15. Zona 0 y ausencia de pulso son conceptos diferentes.
+16. La ausencia de sueño o VFC debe permanecer explícita, sin sustituciones.
+17. Los logs de depuración solo pueden mostrar método, fecha, forma del payload
+    y motivo de ausencia; nunca valores personales ni tokens.
+
+## Dependencias
+
+- `garminconnect`: cliente de Garmin Connect.
+- `garth`: autenticación OAuth/SSO.
+- `tzdata` en Windows: zonas IANA y cambios horarios históricos.
+
+La edición de Windows utiliza Python 3.11 y .NET 11, tal como se indica en
+`README.md` y en el instalador.
+
+## Archivos principales
+
+| Archivo | Finalidad |
+|---|---|
+| `garmin_export.py` | Exportador y transformaciones |
+| `requirements.txt` | Dependencias Python generales |
+| `requirements-windows-lock.txt` | Versiones comprobadas para Windows |
+| `GarminDataExport.csproj` | Capa .NET de consola |
+| `GarminDataExport.Launcher/` | Lanzador gráfico para Windows |
+| `Setup-Windows.ps1` | Instalación automatizada |
+| `Instalar.bat` | Entrada de instalación por doble clic |
+| `README.md` | Guía completa para personas |
+| `LEEME_PRIMERO.txt` | Guía rápida |
+| `tests/` | Pruebas automatizadas y fixtures anonimizadas |
+| `.gitignore` | Exclusión de credenciales, caché y exportaciones |
+| `LICENSE` | Licencia Apache 2.0 oficial |

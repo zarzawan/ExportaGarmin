@@ -1,2 +1,3 @@
 garminconnect
 garth
+tzdata; platform_system == "Windows"
