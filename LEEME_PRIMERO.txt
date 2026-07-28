@@ -1,0 +1,25 @@
+EXPORTADOR DE DATOS DE GARMIN
+==============================
+
+INSTALACIÓN
+
+1. Asegúrate de haber extraído por completo el archivo ZIP.
+2. Haz doble clic en Instalar.bat.
+3. No cierres la ventana negra mientras trabaja.
+4. Si lo solicita, inicia sesión con tu propia cuenta de Garmin.
+5. No compartas tu contraseña, código MFA ni tokens con nadie.
+6. Cuando termine, haz doble clic en GarminLauncher.exe.
+
+USO
+
+1. Elige la fecha desde la que quieres descargar tus datos.
+2. Pulsa "Crear o actualizar".
+3. Espera hasta que aparezca "Actualización completada".
+4. Pulsa "Abrir archivo" para ver el resultado.
+
+El archivo actualizado queda en:
+
+export\managed\garmin_actual.txt
+
+Si algo falla, cierra GarminLauncher.exe y ejecuta Instalar.bat otra vez.
+La guía completa está en README.md.

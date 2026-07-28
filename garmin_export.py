@@ -76,7 +76,7 @@ class RateLimiter:
             self.call_count += 1
             # Light breather every 250 calls
             if self.call_count % 250 == 0:
-                log.info(f"  Pacing break after {self.call_count} API calls...")
+                log.info(f"  Pausa de seguridad después de {self.call_count} llamadas a la API...")
                 time.sleep(2)
 
     def on_success(self):
@@ -89,7 +89,7 @@ class RateLimiter:
         with self._lock:
             self.consecutive_ok = 0
             self.current_delay = min(self.current_delay * 2, 10.0)
-            log.warning(f"  Rate limited -- delay now {self.current_delay:.1f}s, waiting 60s...")
+            log.warning(f"  Límite de Garmin alcanzado: nueva espera {self.current_delay:.1f}s; pausando 60s...")
         time.sleep(60)
 
     def on_error(self):
@@ -116,7 +116,7 @@ def safe_call(fn, *args, label: str = "", **kwargs) -> Optional[Any]:
             _limiter.on_success()
             return result
         except Exception as e:
-            log.warning(f"  Retry failed ({label}): {e}")
+            log.warning(f"  El reintento ha fallado ({label}): {e}")
             _limiter.on_error()
             return None
     except GarthHTTPError as e:
@@ -125,13 +125,13 @@ def safe_call(fn, *args, label: str = "", **kwargs) -> Optional[Any]:
             _limiter.on_rate_limit()
             return None
         if status in (400, 404):
-            log.debug(f"  Not available ({status}) [{label}]")
+            log.debug(f"  No disponible ({status}) [{label}]")
         else:
             log.warning(f"  HTTP {status} [{label}]: {e}")
             _limiter.on_error()
         return None
     except Exception as e:
-        log.warning(f"  API error [{label}]: {e}")
+        log.warning(f"  Error de la API [{label}]: {e}")
         _limiter.on_error()
         return None
 
@@ -174,36 +174,37 @@ def _friendly_login_error(exc: Exception) -> str:
                 break
 
     if status == 401:
-        return "Wrong email or password (401 Unauthorized)."
+        return "Correo o contraseña incorrectos (401)."
     if status == 403:
-        return "Access denied (403 Forbidden). Your account may be locked -- try logging in at connect.garmin.com first."
+        return "Acceso denegado (403). La cuenta puede estar bloqueada; intenta entrar primero en connect.garmin.com."
     if status == 429:
-        return "Too many login attempts (429). Wait a few minutes and try again."
+        return "Demasiados intentos de inicio de sesión (429). Espera unos minutos y vuelve a intentarlo."
     if "authentication" in msg.lower() or "unauthorized" in msg.lower():
-        return "Wrong email or password."
+        return "Correo o contraseña incorrectos."
     if "connection" in msg.lower() or "timeout" in msg.lower():
-        return "Could not reach Garmin servers. Check your internet connection."
+        return "No se pudo contactar con Garmin. Comprueba la conexión a Internet."
 
     # Fallback: truncate at the first URL to avoid the wall of text
     if "https://" in msg:
         msg = msg[:msg.index("https://")].rstrip(": ")
-    return msg or "Unknown login error."
+    return msg or "Error de inicio de sesión desconocido."
 
 
 def _print_login_error(exc: Exception, attempt: int, max_attempts: int):
     friendly = _friendly_login_error(exc)
-    log.error(f"Login failed: {friendly}")
-    log.debug(f"Full error: {exc}")
+    log.error(f"El inicio de sesión ha fallado: {friendly}")
+    log.debug(f"Error completo: {exc}")
     if attempt < max_attempts:
         remaining = max_attempts - attempt
-        print(f"\n  You have {remaining} {'attempt' if remaining == 1 else 'attempts'} left. Try again:\n")
+        suffix = "intento" if remaining == 1 else "intentos"
+        print(f"\n  Quedan {remaining} {suffix}. Vuelve a intentarlo:\n")
 
 
 def _persist_auth_tokens(garmin: Garmin, tokenstore_path: Path):
-    """Save tokens with both legacy and current garminconnect clients."""
+    """Guarda tokens con clientes antiguos y actuales de garminconnect."""
     auth_client = getattr(garmin, "garth", None) or getattr(garmin, "client", None)
     if auth_client is None or not hasattr(auth_client, "dump"):
-        raise RuntimeError("Unsupported garminconnect version: token storage API not found")
+        raise RuntimeError("Versión de garminconnect no compatible: no se encontró la función para guardar tokens")
     auth_client.dump(str(tokenstore_path))
 
 
@@ -222,13 +223,13 @@ def authenticate(tokenstore: str) -> Garmin:
         try:
             garmin = Garmin()
             garmin.login(str(tokenstore_path))
-            log.info("Authenticated with cached tokens")
+            log.info("Sesión iniciada con los tokens guardados")
             return garmin
         except (FileNotFoundError, GarthHTTPError, GarminConnectAuthenticationError,
                 GarminConnectConnectionError) as e:
-            log.info(f"Cached tokens expired or invalid ({type(e).__name__}), need fresh login")
+            log.info(f"Los tokens guardados han caducado o no son válidos ({type(e).__name__}); hace falta iniciar sesión")
         except Exception as e:
-            log.info(f"Token load failed ({e}), need fresh login")
+            log.info(f"No se pudieron cargar los tokens ({e}); hace falta iniciar sesión")
 
     # --- Step 2: Load .env if available ---
     _load_env_file()
@@ -240,28 +241,25 @@ def authenticate(tokenstore: str) -> Garmin:
     if not email or not password:
         print()
         print()
-        print("  One-time Garmin Connect Login")
-        print("  -----------------------------")
-        print("  Credentials are sent directly to Garmin's SSO")
-        print("  (same secure login as the website/app).")
-        print("  Auth tokens are cached locally for ~1 year.")
-        print("  You won't need to enter these again.")
-        print()
-        print("  Tip: create a .env file to skip this prompt:")
-        print("    GARMIN_EMAIL=you@example.com")
-        print("    GARMIN_PASSWORD=your-password")
+        print("  Inicio de sesión de Garmin Connect")
+        print("  ----------------------------------")
+        print("  Las credenciales se envían directamente al acceso seguro de Garmin")
+        print("  (el mismo que utiliza la página web y la aplicación).")
+        print("  Los tokens de sesión se guardan localmente durante aproximadamente un año.")
+        print("  La contraseña no se almacena en el proyecto.")
+        print("  No compartas tu contraseña, código MFA ni tokens con nadie.")
         print()
         print()
         if not email:
-            email = input("  Garmin email: ").strip()
+            email = input("  Correo de Garmin: ").strip()
         if not password:
-            password = getpass("  Garmin password: ")
+            password = getpass("  Contraseña de Garmin: ")
 
     if not email or not password:
-        log.error("Email and password are required")
+        log.error("El correo y la contraseña son obligatorios")
         sys.exit(1)
 
-    log.info("Logging in to Garmin Connect...")
+    log.info("Iniciando sesión en Garmin Connect...")
     garmin = Garmin(email=email, password=password, is_cn=False, return_on_mfa=True)
 
     max_attempts = 3
@@ -274,31 +272,31 @@ def authenticate(tokenstore: str) -> Garmin:
             if attempt == max_attempts:
                 sys.exit(1)
             # Let them re-enter credentials for the next try
-            email = input("  Garmin email: ").strip()
-            password = getpass("  Garmin password: ")
+            email = input("  Correo de Garmin: ").strip()
+            password = getpass("  Contraseña de Garmin: ")
             garmin = Garmin(email=email, password=password, is_cn=False, return_on_mfa=True)
         except GarminConnectConnectionError as e:
-            log.error(f"Connection error -- can't reach Garmin servers. Check your internet.")
-            log.debug(f"Details: {e}")
+            log.error("Error de conexión: no se pudo contactar con Garmin. Comprueba Internet.")
+            log.debug(f"Detalles: {e}")
             sys.exit(1)
         except (GarthHTTPError, Exception) as e:
             _print_login_error(e, attempt, max_attempts)
             if attempt == max_attempts:
                 sys.exit(1)
-            email = input("  Garmin email: ").strip()
-            password = getpass("  Garmin password: ")
+            email = input("  Correo de Garmin: ").strip()
+            password = getpass("  Contraseña de Garmin: ")
             garmin = Garmin(email=email, password=password, is_cn=False, return_on_mfa=True)
 
     if result1 == "needs_mfa":
         print()
-        mfa_code = input("  Enter MFA/2FA code from your authenticator app: ").strip()
+        mfa_code = input("  Código MFA/2FA de tu aplicación de autenticación: ").strip()
         garmin.resume_login(result2, mfa_code)
 
     # Save tokens for next time
     tokenstore_path.mkdir(parents=True, exist_ok=True)
     _persist_auth_tokens(garmin, tokenstore_path)
-    log.info(f"Authenticated -- tokens saved to {tokenstore_path}")
-    log.info("   (Future runs will use cached tokens automatically)")
+    log.info(f"Sesión iniciada: tokens guardados en {tokenstore_path}")
+    log.info("   (Las próximas ejecuciones utilizarán los tokens automáticamente)")
     return garmin
 
 
@@ -517,16 +515,16 @@ class ExportCache:
         if total:
             parts = []
             if daily_health:
-                parts.append(f"{daily_health} daily health")
+                parts.append(f"{daily_health} días de salud")
             if daily_hydration:
-                parts.append(f"{daily_hydration} hydration")
+                parts.append(f"{daily_hydration} días de hidratación")
             if daily_nutrition:
-                parts.append(f"{daily_nutrition} nutrition")
+                parts.append(f"{daily_nutrition} días de nutrición")
             if existing_acts:
-                parts.append(f"{existing_acts} activities")
+                parts.append(f"{existing_acts} actividades")
             if existing_sects:
-                parts.append(f"{existing_sects} sections")
-            log.info(f"Cache: {', '.join(parts)}")
+                parts.append(f"{existing_sects} secciones")
+            log.info(f"Caché: {', '.join(parts)}")
 
     def _wipe(self):
         """Remove stale cache."""
@@ -598,9 +596,9 @@ class ExportCache:
     def summary(self) -> str:
         total = self.hits + self.misses
         if total == 0:
-            return "Cache: no lookups"
+            return "Caché: sin consultas"
         pct = (self.hits / total) * 100
-        return f"Cache: {self.hits} hits, {self.misses} misses ({pct:.0f}% hit rate)"
+        return f"Caché: {self.hits} reutilizados, {self.misses} nuevos ({pct:.0f}% reutilizado)"
 
 
 # ---------------------------------------------------------------------------
@@ -629,10 +627,10 @@ class GarminExporter:
                 self.update_base_date = base_end.isoformat()
                 # Overlap by 1 day to catch late-arriving data
                 self.start_date = base_end - timedelta(days=1)
-                log.info(f"Update mode: last export ends {base_end}, "
-                         f"fetching from {self.start_date}")
+                log.info(f"Modo de actualización: la última exportación termina el {base_end}; "
+                         f"descargando desde {self.start_date}")
             else:
-                log.warning("No previous export found -- falling back to --days")
+                log.warning("No se encontró una exportación anterior; se utilizará --days")
                 self.start_date = self.today - timedelta(days=days)
         elif explicit_start_date is not None:
             self.start_date = explicit_start_date
@@ -676,16 +674,16 @@ class GarminExporter:
             if m:
                 end_str = m.group(2)
                 end_date = date.fromisoformat(end_str)
-                log.info(f"Found latest export: {newest_file.name} "
-                         f"(ends {end_date})")
+                log.info(f"Última exportación encontrada: {newest_file.name} "
+                         f"(termina el {end_date})")
                 return end_date
         except (OSError, ValueError) as e:
-            log.warning(f"Could not parse export header: {e}")
+            log.warning(f"No se pudo interpretar la cabecera de la exportación: {e}")
 
         # Fallback: parse date from filename timestamp
         try:
             d = datetime.strptime(newest_ts, "%Y-%m-%d_%H%M%S").date()
-            log.info(f"Using filename date as fallback: {d}")
+            log.info(f"Se utilizará como alternativa la fecha del archivo: {d}")
             return d
         except ValueError:
             return None
@@ -697,7 +695,7 @@ class GarminExporter:
         to catch any health data before the first tracked activity.
         Falls back to 5 years if we can't determine it.
         """
-        log.info("Detecting account history range...")
+        log.info("Detectando el periodo disponible en la cuenta...")
 
         # Try getting the oldest activity (sort ascending, grab first)
         oldest = safe_call(
@@ -713,15 +711,15 @@ class GarminExporter:
                     d = date.fromisoformat(start_str)
                     # Pad a week earlier to catch pre-activity health data
                     d = d - timedelta(days=7)
-                    log.info(f"Oldest activity found: {start_str}")
-                    log.info(f"Will export from: {d}")
+                    log.info(f"Actividad más antigua encontrada: {start_str}")
+                    log.info(f"Se exportará desde: {d}")
                     return d
                 except ValueError:
                     pass
 
         # Fallback: 5 years
         fallback = self.today - timedelta(days=365 * 5)
-        log.info(f"Could not detect oldest data, defaulting to {fallback}")
+        log.info(f"No se pudo detectar el dato más antiguo; se utilizará {fallback}")
         return fallback
 
     def run(self):
@@ -731,21 +729,21 @@ class GarminExporter:
             suffix = "_update"
         filename = f"garmin_export_{now.strftime('%Y-%m-%d_%H%M%S')}{suffix}.txt"
 
-        log.info(f"Date range: {self.start_date} to {self.today} ({self.days} days)")
+        log.info(f"Periodo: {self.start_date} a {self.today} ({self.days} días)")
         if self.update_mode:
-            log.info(f"Mode: update (new data since {self.update_base_date})")
+            log.info(f"Modo: actualización (datos nuevos desde {self.update_base_date})")
         if _compact_mode:
-            log.info("Mode: compact (smaller output for LLM upload)")
+            log.info("Modo: compacto (archivo más pequeño para herramientas de IA)")
         if _split_mode:
-            log.info("Mode: split (multiple files, <500K words each)")
+            log.info("Modo: dividido (varios archivos de menos de 500.000 palabras)")
         if self.fetch_all and not self.update_mode:
-            log.info(f"Mode: --all (fetching complete history)")
-            log.info(f"Max activities: unlimited")
+            log.info("Modo: --all (historial completo)")
+            log.info("Máximo de actividades: sin límite")
         elif self.explicit_start_date is not None:
-            log.info(f"Mode: explicit start date ({self.explicit_start_date})")
-            log.info("Activities: all in selected date range")
+            log.info(f"Modo: fecha inicial concreta ({self.explicit_start_date})")
+            log.info("Actividades: todas las incluidas en el periodo elegido")
         else:
-            log.info(f"Max activities: {self.max_activities}")
+            log.info(f"Máximo de actividades: {self.max_activities}")
         print()
 
         if self.update_mode:
@@ -857,17 +855,17 @@ class GarminExporter:
         self.md.append("")
 
         for name, fn in sections:
-            log.info(f"Exporting {name}...")
+            log.info(f"Exportando {name}...")
             try:
                 fn()
-                log.info(f"  Done: {name}")
+                log.info(f"  Completado: {name}")
             except KeyboardInterrupt:
-                log.info(f"\n  Interrupted during {name} -- saving partial export")
+                log.info(f"\n  Interrumpido durante {name}; se guardará la exportación parcial")
                 self.errors.append(f"{name}: interrupted by user (partial data)")
                 break
             except Exception as e:
                 self.errors.append(f"{name}: {e}")
-                log.error(f"  Failed: {name}: {e}")
+                log.error(f"  Fallo en {name}: {e}")
                 log.debug(traceback.format_exc())
 
         if self.errors:
@@ -883,22 +881,22 @@ class GarminExporter:
         if _split_mode:
             written = self._write_split(full_text, filename)
             print()
-            log.info(f"Export complete: {len(written)} files in {self.out}")
+            log.info(f"Exportación completada: {len(written)} archivos en {self.out}")
             total_kb = sum(p.stat().st_size for p in written) / 1024
-            log.info(f"Total size: {total_kb:.0f} KB across {len(written)} files")
+            log.info(f"Tamaño total: {total_kb:.0f} KB en {len(written)} archivos")
         else:
             out_path = self.out / filename
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_text(full_text, encoding="utf-8")
             size_kb = out_path.stat().st_size / 1024
             print()
-            log.info(f"Export complete: {out_path}")
-            log.info(f"File size: {size_kb:.0f} KB")
+            log.info(f"Exportación completada: {out_path}")
+            log.info(f"Tamaño del archivo: {size_kb:.0f} KB")
 
-        log.info(f"API calls: {_limiter.call_count}")
+        log.info(f"Llamadas a la API: {_limiter.call_count}")
         log.info(self.cache.summary())
         if self.errors:
-            log.warning(f"{len(self.errors)} section(s) had errors")
+            log.warning(f"{len(self.errors)} secciones tuvieron errores")
 
     def _write_split(self, full_text: str, base_filename: str) -> list:
         """Split the export into multiple files, each under the word limit.
@@ -977,7 +975,7 @@ class GarminExporter:
             wc = _word_count(content)
             size_kb = path.stat().st_size / 1024
             written.append(path)
-            log.info(f"  Part {i}/{total}: {fname} ({wc:,} words, {size_kb:.0f} KB)")
+            log.info(f"  Parte {i}/{total}: {fname} ({wc:,} palabras, {size_kb:.0f} KB)")
 
         return written
 
@@ -1108,9 +1106,9 @@ class GarminExporter:
     def export_daily_health(self):
         weeks = self.days / 7
         months = self.days / 30.44
-        log.info(f"  {self.days} days to process ({months:.1f} months / {weeks:.0f} weeks)")
-        log.info(f"  Date range: {self.start_date} to {self.today}")
-        log.info(f"  13 API calls per day, fetching 4 at a time")
+        log.info(f"  {self.days} días para procesar ({months:.1f} meses / {weeks:.0f} semanas)")
+        log.info(f"  Periodo: {self.start_date} a {self.today}")
+        log.info("  13 llamadas por día, descargando 4 simultáneamente")
 
         self.md.append("\nDaily Health\n")
 
@@ -1213,11 +1211,11 @@ class GarminExporter:
                     remaining_fetch = max(0, self.days - done)
                     eta_sec = remaining_fetch * per_day
                     eta_min = eta_sec / 60
-                    log.info(f"  {done}/{self.days} days ({d_display}) | "
+                    log.info(f"  {done}/{self.days} días ({d_display}) | "
                              f"{cached_days} cached | "
                              f"{_limiter.call_count} calls | ~{eta_min:.0f}m remaining")
                 else:
-                    log.info(f"  {done}/{self.days} days ({d_display}) | "
+                    log.info(f"  {done}/{self.days} días ({d_display}) | "
                              f"{cached_days} cached (all from cache so far)")
 
         if _compact_mode:
@@ -1252,7 +1250,7 @@ class GarminExporter:
                 ) or []
 
         self.md.append(f"Total activities found: {len(activities)}\n")
-        log.info(f"  {len(activities)} activities found, 10 API calls each = up to {len(activities) * 10:,} calls")
+        log.info(f"  {len(activities)} actividades encontradas, hasta 10 llamadas por actividad = {len(activities) * 10:,} llamadas")
 
         t_start = time.time()
         cached_acts = 0
@@ -1320,10 +1318,10 @@ class GarminExporter:
                     per_act = elapsed / fetched
                     remaining = max(0, len(activities) - done)
                     eta_min = (remaining * per_act) / 60
-                    log.info(f"  {done}/{len(activities)} activities | {cached_acts} cached | "
+                    log.info(f"  {done}/{len(activities)} actividades | {cached_acts} en caché | "
                              f"{_limiter.call_count} calls | ~{eta_min:.0f}m remaining")
                 else:
-                    log.info(f"  {done}/{len(activities)} activities | {cached_acts} cached")
+                    log.info(f"  {done}/{len(activities)} actividades | {cached_acts} en caché")
 
         if _compact_mode:
             if all_activities:
@@ -1657,7 +1655,7 @@ class GarminExporter:
     # ===================================================================
     def export_hydration(self):
         self.md.append("\nHydration\n")
-        log.info(f"  {self.days} days to check")
+        log.info(f"  {self.days} días para comprobar")
 
         # Collect all days, split cached vs uncached
         days_list = []
@@ -1673,7 +1671,7 @@ class GarminExporter:
             else:
                 uncached_dates.append(ds)
 
-        log.info(f"  {len(cached_results)} cached, {len(uncached_dates)} to fetch")
+        log.info(f"  {len(cached_results)} en caché, {len(uncached_dates)} por descargar")
 
         # Fetch uncached days concurrently
         fetched_results = {}
@@ -1694,7 +1692,7 @@ class GarminExporter:
                         elapsed = time.time() - t_start
                         remaining = len(uncached_dates) - done
                         eta = (elapsed / done * remaining / 60) if done else 0
-                        log.info(f"    {done}/{len(uncached_dates)} fetched | ~{eta:.0f}m remaining")
+                        log.info(f"    {done}/{len(uncached_dates)} descargados | quedan aproximadamente {eta:.0f} min")
 
         # Write markdown in chronological order
         if _compact_mode:
@@ -1724,7 +1722,7 @@ class GarminExporter:
     # ===================================================================
     def export_nutrition(self):
         self.md.append("\nNutrition\n")
-        log.info(f"  {self.days} days to check")
+        log.info(f"  {self.days} días para comprobar")
 
         # Collect all days, split cached vs uncached
         days_list = []
@@ -1740,7 +1738,7 @@ class GarminExporter:
             else:
                 uncached_dates.append(ds)
 
-        log.info(f"  {len(cached_results)} cached, {len(uncached_dates)} to fetch")
+        log.info(f"  {len(cached_results)} en caché, {len(uncached_dates)} por descargar")
 
         # Fetch uncached days concurrently (3 API calls per day)
         fetched_results = {}
@@ -1763,7 +1761,7 @@ class GarminExporter:
                         elapsed = time.time() - t_start
                         remaining = len(uncached_dates) - done
                         eta = (elapsed / done * remaining / 60) if done else 0
-                        log.info(f"    {done}/{len(uncached_dates)} fetched | ~{eta:.0f}m remaining")
+                        log.info(f"    {done}/{len(uncached_dates)} descargados | quedan aproximadamente {eta:.0f} min")
 
         # Write markdown in chronological order
         if _compact_mode:
@@ -1834,46 +1832,44 @@ class GarminExporter:
 # ---------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(
-        description="Export Garmin Connect health & fitness data to plain text with JSON",
+        description="Exporta los datos de salud y actividad de Garmin Connect a texto con JSON",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  python garmin_export.py --login                   # Just login & cache tokens
-  python garmin_export.py                           # Last 30 days, 100 activities
-  python garmin_export.py --all                     # Everything, back to day one
-  python garmin_export.py --all --compact           # Everything, smaller file for LLM upload
-  python garmin_export.py --all --split             # Split into files for NotebookLM upload
-  python garmin_export.py --update                  # Export only new data since last export
-  python garmin_export.py --all --no-cache          # Full re-fetch, ignore cache
-  python garmin_export.py --start-date 2025-01-01   # Everything from a chosen date
-  python garmin_export.py --days 365                # Full year of daily health
+Ejemplos:
+  python garmin_export.py --login                   # Iniciar sesión y guardar tokens
+  python garmin_export.py                           # Últimos 30 días y 100 actividades
+  python garmin_export.py --all                     # Historial completo
+  python garmin_export.py --all --compact           # Historial completo en un archivo más pequeño
+  python garmin_export.py --all --split             # Dividir para cargarlo en NotebookLM
+  python garmin_export.py --update                  # Exportar solo los datos nuevos
+  python garmin_export.py --all --no-cache          # Descargar todo de nuevo sin usar caché
+  python garmin_export.py --start-date 2025-01-01   # Exportar desde una fecha concreta
+  python garmin_export.py --days 365                # Un año de datos diarios
   python garmin_export.py --days 90 --activities 500
-  python garmin_export.py --delay 1.0               # Slower pace (safer)
+  python garmin_export.py --delay 1.0               # Ritmo más lento
 
-Authentication (one-time setup):
-  Option 1: Run with --login, enter credentials when prompted
-  Option 2: Create a .env file with GARMIN_EMAIL and GARMIN_PASSWORD
-  Option 3: Set GARMIN_EMAIL and GARMIN_PASSWORD environment variables
-  Tokens are cached locally for ~1 year after first login.
+Inicio de sesión:
+  Ejecuta --login y escribe las credenciales cuando se soliciten.
+  Los tokens se guardan localmente durante aproximadamente un año.
 """,
     )
-    parser.add_argument("--all", action="store_true", help="Export complete history (auto-detects how far back to go)")
-    parser.add_argument("--days", type=int, default=30, help="Days of daily health data (default: 30)")
-    parser.add_argument("--activities", type=int, default=100, help="Max activities to export (default: 100)")
+    parser.add_argument("--all", action="store_true", help="Exportar el historial completo")
+    parser.add_argument("--days", type=int, default=30, help="Días de datos diarios (predeterminado: 30)")
+    parser.add_argument("--activities", type=int, default=100, help="Número máximo de actividades (predeterminado: 100)")
     parser.add_argument("--start-date", type=str, default=None,
-                        help="Export from this date (YYYY-MM-DD), including all activities in the range")
-    parser.add_argument("--output", type=str, default="export", help="Output directory (default: export)")
-    parser.add_argument("--tokenstore", type=str, default=None, help="Token storage path")
-    parser.add_argument("--delay", type=float, default=0.15, help="Base delay between API calls in seconds (default: 0.15)")
-    parser.add_argument("--no-cache", action="store_true", help="Disable caching (re-fetch everything)")
+                        help="Exportar desde esta fecha (AAAA-MM-DD), incluidas todas las actividades del periodo")
+    parser.add_argument("--output", type=str, default="export", help="Carpeta de salida (predeterminada: export)")
+    parser.add_argument("--tokenstore", type=str, default=None, help="Ruta donde se guardan los tokens")
+    parser.add_argument("--delay", type=float, default=0.15, help="Espera base entre llamadas en segundos (predeterminada: 0.15)")
+    parser.add_argument("--no-cache", action="store_true", help="No utilizar la caché y descargar todo de nuevo")
     parser.add_argument("--compact", action="store_true",
-                        help="Smaller output: strip nulls, single-line JSON, drop activity time-series, downsample daily data")
+                        help="Crear un archivo más pequeño para herramientas de IA")
     parser.add_argument("--split", action="store_true",
-                        help="Split output into multiple files under 500K words each (for NotebookLM). Implies --compact")
+                        help="Dividir la salida en archivos de menos de 500.000 palabras. Activa --compact")
     parser.add_argument("--update", action="store_true",
-                        help="Export only new data since last export. Implies --compact. Produces a small update file")
-    parser.add_argument("--login", action="store_true", help="Just authenticate and save tokens, then exit")
-    parser.add_argument("--verbose", action="store_true", help="Debug logging")
+                        help="Exportar solo los datos nuevos desde la última exportación. Activa --compact")
+    parser.add_argument("--login", action="store_true", help="Iniciar sesión, guardar tokens y salir")
+    parser.add_argument("--verbose", action="store_true", help="Mostrar información técnica detallada")
 
     args = parser.parse_args()
 
@@ -1882,11 +1878,11 @@ Authentication (one-time setup):
         try:
             explicit_start_date = date.fromisoformat(args.start_date)
         except ValueError:
-            parser.error("--start-date must use YYYY-MM-DD format")
+            parser.error("--start-date debe utilizar el formato AAAA-MM-DD")
         if explicit_start_date > date.today():
-            parser.error("--start-date cannot be in the future")
+            parser.error("--start-date no puede ser una fecha futura")
         if args.all or args.update:
-            parser.error("--start-date cannot be combined with --all or --update")
+            parser.error("--start-date no se puede combinar con --all ni --update")
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
@@ -1900,8 +1896,8 @@ Authentication (one-time setup):
     _compact_mode = args.compact
 
     print()
-    print("  Garmin Connect Data Export")
-    print(f"  {'-' * 26}")
+    print("  Exportador de datos de Garmin Connect")
+    print(f"  {'-' * 38}")
     print()
 
     tokenstore = args.tokenstore or os.getenv("GARMINTOKENS", "~/.garminconnect")
@@ -1909,18 +1905,18 @@ Authentication (one-time setup):
     try:
         api = authenticate(tokenstore)
     except GarminConnectTooManyRequestsError:
-        log.error("Too many requests. Wait a few minutes and try again.")
+        log.error("Demasiadas solicitudes. Espera unos minutos y vuelve a intentarlo.")
         sys.exit(1)
     except SystemExit:
         raise
     except Exception as e:
-        log.error(f"Authentication failed: {_friendly_login_error(e)}")
-        log.debug(f"Full error: {e}")
+        log.error(f"El inicio de sesión ha fallado: {_friendly_login_error(e)}")
+        log.debug(f"Error completo: {e}")
         sys.exit(1)
 
     if args.login:
         print()
-        log.info("Login successful -- tokens cached. You can now run exports.")
+        log.info("Inicio de sesión correcto: los tokens están guardados. Ya puedes realizar exportaciones.")
         sys.exit(0)
 
     out = Path(args.output)
@@ -1929,9 +1925,9 @@ Authentication (one-time setup):
     use_cache = not getattr(args, 'no_cache', False)
     cache = ExportCache(out, enabled=use_cache)
     if use_cache:
-        log.info(f"Cache: enabled (resume interrupted exports)")
+        log.info("Caché: activada (permite continuar exportaciones interrumpidas)")
     else:
-        log.info(f"Cache: disabled (--no-cache)")
+        log.info("Caché: desactivada (--no-cache)")
 
     exporter = GarminExporter(api, out, args.days, args.activities,
                               fetch_all=getattr(args, 'all', False),
@@ -1942,7 +1938,7 @@ Authentication (one-time setup):
         exporter.run()
     except KeyboardInterrupt:
         print()
-        log.info("Interrupted -- cached data is saved, re-run to continue")
+        log.info("Proceso interrumpido: los datos de la caché están guardados. Ejecuta de nuevo para continuar.")
         sys.exit(130)
 
 

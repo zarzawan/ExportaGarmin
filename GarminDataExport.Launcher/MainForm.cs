@@ -6,6 +6,23 @@ namespace GarminDataExport.Launcher;
 
 internal sealed class MainForm : Form
 {
+    private static readonly (string English, string Spanish)[] SectionTranslations =
+    [
+        ("Profile", "Perfil"),
+        ("Daily Health", "Salud diaria"),
+        ("Activities", "Actividades"),
+        ("Body Composition", "Composición corporal"),
+        ("Training Metrics", "Métricas de entrenamiento"),
+        ("Goals and Records", "Objetivos y récords"),
+        ("Trends", "Tendencias"),
+        ("Gear", "Equipamiento"),
+        ("Training Plans", "Planes de entrenamiento"),
+        ("Workouts", "Entrenamientos"),
+        ("Hydration", "Hidratación"),
+        ("Nutrition", "Nutrición"),
+        ("Women's Health", "Salud femenina"),
+    ];
+
     private readonly DateTimePicker _startDatePicker = new();
     private readonly Button _runButton = new();
     private readonly Button _openFolderButton = new();
@@ -21,7 +38,7 @@ internal sealed class MainForm : Form
 
     public MainForm()
     {
-        Text = "Garmin Data Export";
+        Text = "Exportador de datos de Garmin";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(760, 540);
         Size = new Size(840, 620);
@@ -157,7 +174,7 @@ internal sealed class MainForm : Form
     {
         if (_projectRoot is null || _outputDirectory is null)
         {
-            ShowError("No se encontró garmin_export.py ni el entorno .venv junto al lanzador.");
+            ShowError("No se encontró la instalación completa junto al lanzador. Ejecuta Instalar.bat para repararla.");
             return;
         }
 
@@ -167,7 +184,7 @@ internal sealed class MainForm : Form
         if (!Directory.Exists(tokenDirectory) ||
             !Directory.EnumerateFiles(tokenDirectory).Any())
         {
-            ShowError("No hay un inicio de sesión guardado. Ejecuta primero el login desde PowerShell.");
+            ShowError("No hay una sesión de Garmin guardada. Cierra esta ventana y ejecuta Instalar.bat para iniciar sesión.");
             return;
         }
 
@@ -233,7 +250,7 @@ internal sealed class MainForm : Form
             MessageBox.Show(
                 this,
                 "La exportación se actualizó correctamente.",
-                "Garmin Data Export",
+                "Exportador de datos de Garmin",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
         }
@@ -252,7 +269,14 @@ internal sealed class MainForm : Form
     private async Task PumpOutputAsync(StreamReader reader)
     {
         while (await reader.ReadLineAsync() is { } line)
-            AppendLog(line);
+            AppendLog(TranslateVisibleLogLine(line));
+    }
+
+    private static string TranslateVisibleLogLine(string line)
+    {
+        foreach (var (english, spanish) in SectionTranslations)
+            line = line.Replace(english, spanish, StringComparison.Ordinal);
+        return line;
     }
 
     private void AppendLog(string line)
@@ -292,7 +316,7 @@ internal sealed class MainForm : Form
         _projectRoot = FindProjectRoot();
         if (_projectRoot is null)
         {
-            _statusLabel.Text = "No se encontró el proyecto";
+            _statusLabel.Text = "No se encontró la instalación";
             _outputLabel.Text = "Coloca GarminLauncher.exe dentro de la carpeta del proyecto.";
             _runButton.Enabled = false;
             _openFolderButton.Enabled = false;
@@ -405,7 +429,7 @@ internal sealed class MainForm : Form
         }
         catch
         {
-            // A damaged preference file should not prevent the launcher from opening.
+            // Un archivo de preferencias dañado no debe impedir que se abra el lanzador.
         }
 
         if (defaultDate < _startDatePicker.MinDate)
@@ -430,7 +454,7 @@ internal sealed class MainForm : Form
         MessageBox.Show(
             this,
             message,
-            "Garmin Data Export",
+            "Exportador de datos de Garmin",
             MessageBoxButtons.OK,
             MessageBoxIcon.Error);
     }

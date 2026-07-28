@@ -7,16 +7,16 @@ if (!File.Exists(scriptPath))
 var pythonCommand = await FindPythonAsync();
 if (pythonCommand is null)
 {
-    Console.Error.WriteLine("Python is not installed.");
+    Console.Error.WriteLine("Python no está instalado.");
     if (!await TryInstallPythonAsync())
     {
-        Console.Error.WriteLine("Could not install Python automatically. Please install Python 3 manually.");
+        Console.Error.WriteLine("No se pudo instalar Python automáticamente. Ejecuta Instalar.bat para preparar la aplicación.");
         Environment.Exit(1);
     }
     pythonCommand = await FindPythonAsync();
     if (pythonCommand is null)
     {
-        Console.Error.WriteLine("Python was installed but is not on PATH. Please restart your terminal or add Python to PATH.");
+        Console.Error.WriteLine("Python se instaló, pero Windows todavía no lo encuentra. Reinicia el PC y ejecuta Instalar.bat.");
         Environment.Exit(1);
     }
 }
@@ -34,7 +34,7 @@ foreach (var arg in args)
 using var process = Process.Start(psi);
 if (process is null)
 {
-    Console.Error.WriteLine("Failed to start Python.");
+    Console.Error.WriteLine("No se pudo iniciar Python.");
     Environment.Exit(1);
 }
 
@@ -43,7 +43,7 @@ Environment.Exit(process.ExitCode);
 
 static async Task<string?> FindPythonAsync()
 {
-    // Try "python" then "python3" (some systems only have python3)
+    // Probar primero "python" y después "python3".
     foreach (var candidate in new[] { "python", "python3" })
     {
         try
@@ -65,11 +65,11 @@ static async Task<string?> FindPythonAsync()
         }
         catch
         {
-            // Not found, try next
+            // No se encontró; probar la siguiente opción.
         }
     }
 
-    // Check common Windows install locations in case PATH isn't set
+    // Comprobar ubicaciones habituales de Windows cuando PATH no está configurado.
     if (OperatingSystem.IsWindows())
     {
         var localApps = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
@@ -88,7 +88,7 @@ static async Task<string?> FindPythonAsync()
                 }
             }
 
-            // winget installs under Program Files\Python3xx
+            // winget puede instalar Python bajo Program Files\Python3xx.
             foreach (var dir in Directory.GetDirectories(baseDir, "Python3*").OrderDescending())
             {
                 var exe = Path.Combine(dir, "python.exe");
@@ -117,7 +117,7 @@ static async Task<string?> FindPythonAsync()
             }
             catch
             {
-                // Skip broken installs
+                // Ignorar instalaciones que no funcionan.
             }
         }
     }
@@ -129,11 +129,11 @@ static async Task<bool> TryInstallPythonAsync()
 {
     if (!OperatingSystem.IsWindows())
     {
-        Console.Error.WriteLine("Automatic install is only supported on Windows via winget.");
+        Console.Error.WriteLine("La instalación automática solo está disponible en Windows mediante winget.");
         return false;
     }
 
-    // Check if winget is available
+    // Comprobar si winget está disponible.
     try
     {
         var check = new ProcessStartInfo
@@ -152,24 +152,25 @@ static async Task<bool> TryInstallPythonAsync()
     }
     catch
     {
-        Console.Error.WriteLine("winget is not available. Please install Python 3 manually.");
+        Console.Error.WriteLine("winget no está disponible. Ejecuta Instalar.bat o instala Python 3.11 manualmente.");
         return false;
     }
 
-    Console.Write("Would you like to install Python 3 via winget? [Y/n] ");
+    Console.Write("¿Quieres instalar Python 3.11 mediante winget? [S/n] ");
     var response = Console.ReadLine()?.Trim();
     if (response is not null && response.Length > 0
-        && !response.Equals("y", StringComparison.OrdinalIgnoreCase)
-        && !response.Equals("yes", StringComparison.OrdinalIgnoreCase))
+        && !response.Equals("s", StringComparison.OrdinalIgnoreCase)
+        && !response.Equals("si", StringComparison.OrdinalIgnoreCase)
+        && !response.Equals("sí", StringComparison.OrdinalIgnoreCase))
     {
         return false;
     }
 
-    Console.WriteLine("Installing Python via winget...");
+    Console.WriteLine("Instalando Python mediante winget...");
     var psi = new ProcessStartInfo
     {
         FileName = "winget",
-        ArgumentList = { "install", "Python.Python.3.13", "--accept-source-agreements", "--accept-package-agreements" },
+        ArgumentList = { "install", "Python.Python.3.11", "--accept-source-agreements", "--accept-package-agreements" },
         UseShellExecute = false
     };
     using var proc = Process.Start(psi);
@@ -178,14 +179,13 @@ static async Task<bool> TryInstallPythonAsync()
 
     if (proc.ExitCode != 0)
     {
-        Console.Error.WriteLine("winget install failed.");
+        Console.Error.WriteLine("La instalación mediante winget ha fallado.");
         return false;
     }
 
-    Console.WriteLine("Python installed successfully.");
+    Console.WriteLine("Python se ha instalado correctamente.");
 
-    // Refresh PATH from the registry so we can find the newly installed Python
-    // without requiring the user to restart their terminal
+    // Actualizar PATH desde el registro para encontrar Python sin reiniciar.
     RefreshPath();
     return true;
 }

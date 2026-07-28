@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param()
 
 $ErrorActionPreference = 'Stop'
@@ -54,24 +54,26 @@ function Find-DotNet {
 
 function Require-Winget {
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        throw 'winget is required to install missing Windows prerequisites.'
+        throw 'Windows no tiene disponible winget, necesario para instalar los programas que faltan.'
     }
 }
 
 Write-Host ''
-Write-Host 'Garmin Data Export - Windows setup' -ForegroundColor Cyan
-Write-Host '==================================' -ForegroundColor Cyan
+Write-Host 'Exportador de datos de Garmin - Instalación para Windows' -ForegroundColor Cyan
+Write-Host '=========================================================' -ForegroundColor Cyan
+Write-Host ''
+Write-Host 'No cierres esta ventana. Se comprobarán todos los requisitos.' -ForegroundColor Gray
 Write-Host ''
 
 $runningLauncher = Get-Process GarminLauncher -ErrorAction SilentlyContinue
 if ($runningLauncher) {
-    throw 'GarminLauncher.exe is running. Close its window and rerun Setup-Windows.ps1.'
+    throw 'GarminLauncher.exe está abierto. Cierra su ventana y ejecuta de nuevo Instalar.bat.'
 }
 
 $pythonExe = Find-Python311
 if (-not $pythonExe) {
     Require-Winget
-    Write-Host 'Installing Python 3.11...' -ForegroundColor Yellow
+    Write-Host 'Instalando Python 3.11...' -ForegroundColor Yellow
     winget install `
         --id Python.Python.3.11 `
         --exact `
@@ -79,15 +81,15 @@ if (-not $pythonExe) {
         --accept-source-agreements `
         --accept-package-agreements
     if ($LASTEXITCODE -ne 0) {
-        throw "Python installation failed with exit code $LASTEXITCODE."
+        throw "No se pudo instalar Python. Código de error: $LASTEXITCODE."
     }
     Refresh-ProcessPath
     $pythonExe = Find-Python311
     if (-not $pythonExe) {
-        throw 'Python 3.11 was installed but could not be located. Restart PowerShell and rerun setup.'
+        throw 'Python 3.11 se instaló, pero todavía no aparece en Windows. Reinicia el PC y ejecuta de nuevo Instalar.bat.'
     }
 }
-Write-Host "Python: $pythonExe" -ForegroundColor Green
+Write-Host "Python encontrado: $pythonExe" -ForegroundColor Green
 
 $dotnetExe = Find-DotNet
 $hasDotNet11 = $false
@@ -98,7 +100,7 @@ if ($dotnetExe) {
 
 if (-not $hasDotNet11) {
     Require-Winget
-    Write-Host 'Installing .NET 11 SDK...' -ForegroundColor Yellow
+    Write-Host 'Instalando el SDK de .NET 11...' -ForegroundColor Yellow
 
     winget show `
         --id Microsoft.DotNet.SDK.11 `
@@ -118,47 +120,47 @@ if (-not $hasDotNet11) {
         --accept-source-agreements `
         --accept-package-agreements
     if ($LASTEXITCODE -ne 0) {
-        throw ".NET installation failed with exit code $LASTEXITCODE."
+        throw "No se pudo instalar .NET. Código de error: $LASTEXITCODE."
     }
     Refresh-ProcessPath
     $dotnetExe = Find-DotNet
     if (-not $dotnetExe) {
-        throw '.NET was installed but could not be located. Restart PowerShell and rerun setup.'
+        throw '.NET se instaló, pero todavía no aparece en Windows. Reinicia el PC y ejecuta de nuevo Instalar.bat.'
     }
 }
-Write-Host ".NET: $dotnetExe" -ForegroundColor Green
+Write-Host ".NET encontrado: $dotnetExe" -ForegroundColor Green
 
 $venvPython = Join-Path $projectRoot '.venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $venvPython)) {
-    Write-Host 'Creating .venv...' -ForegroundColor Yellow
+    Write-Host 'Creando el entorno privado de Python...' -ForegroundColor Yellow
     & $pythonExe -m venv (Join-Path $projectRoot '.venv')
     if ($LASTEXITCODE -ne 0) {
-        throw "Virtual environment creation failed with exit code $LASTEXITCODE."
+        throw "No se pudo crear el entorno de Python. Código de error: $LASTEXITCODE."
     }
 }
 
-Write-Host 'Installing tested Python dependencies...' -ForegroundColor Yellow
+Write-Host 'Instalando las dependencias comprobadas de Python...' -ForegroundColor Yellow
 & $venvPython -m pip install -r (Join-Path $projectRoot 'requirements-windows-lock.txt')
 if ($LASTEXITCODE -ne 0) {
-    throw "Python dependency installation failed with exit code $LASTEXITCODE."
+    throw "No se pudieron instalar las dependencias de Python. Código de error: $LASTEXITCODE."
 }
 & $venvPython -m pip check
 if ($LASTEXITCODE -ne 0) {
-    throw 'Python dependency validation failed.'
+    throw 'La comprobación de las dependencias de Python ha fallado.'
 }
 
-Write-Host 'Building .NET projects...' -ForegroundColor Yellow
+Write-Host 'Compilando la aplicación .NET...' -ForegroundColor Yellow
 & $dotnetExe restore (Join-Path $projectRoot 'GarminDataExport.slnx')
 if ($LASTEXITCODE -ne 0) {
-    throw ".NET restore failed with exit code $LASTEXITCODE."
+    throw "No se pudieron restaurar las dependencias de .NET. Código de error: $LASTEXITCODE."
 }
 & $dotnetExe build (Join-Path $projectRoot 'GarminDataExport.slnx') --no-restore
 if ($LASTEXITCODE -ne 0) {
-    throw ".NET build failed with exit code $LASTEXITCODE."
+    throw "La compilación de .NET ha fallado. Código de error: $LASTEXITCODE."
 }
 
 $publishDirectory = Join-Path $projectRoot 'GarminDataExport.Launcher\bin\publish'
-Write-Host 'Publishing GarminLauncher.exe...' -ForegroundColor Yellow
+Write-Host 'Creando GarminLauncher.exe...' -ForegroundColor Yellow
 & $dotnetExe publish `
     (Join-Path $projectRoot 'GarminDataExport.Launcher\GarminDataExport.Launcher.csproj') `
     -c Release `
@@ -169,7 +171,7 @@ Write-Host 'Publishing GarminLauncher.exe...' -ForegroundColor Yellow
     -p:DebugSymbols=false `
     -o $publishDirectory
 if ($LASTEXITCODE -ne 0) {
-    throw ".NET publish failed with exit code $LASTEXITCODE."
+    throw "No se pudo crear GarminLauncher.exe. Código de error: $LASTEXITCODE."
 }
 
 $publishedExe = Join-Path $publishDirectory 'GarminLauncher.exe'
@@ -177,16 +179,44 @@ $rootExe = Join-Path $projectRoot 'GarminLauncher.exe'
 Copy-Item -LiteralPath $publishedExe -Destination $rootExe -Force
 
 Write-Host ''
-Write-Host 'Setup completed successfully.' -ForegroundColor Green
-Write-Host "Launcher: $rootExe"
+Write-Host 'La instalación de la aplicación se ha completado correctamente.' -ForegroundColor Green
+Write-Host "Lanzador: $rootExe"
 
 $tokenDirectory = Join-Path $env:USERPROFILE '.garminconnect'
-if (-not (Test-Path -LiteralPath $tokenDirectory)) {
+$hasSavedSession = (Test-Path -LiteralPath $tokenDirectory) -and
+    [bool](Get-ChildItem -LiteralPath $tokenDirectory -File -ErrorAction SilentlyContinue)
+
+if (-not $hasSavedSession) {
     Write-Host ''
-    Write-Host 'Before the first export, log in once:' -ForegroundColor Yellow
-    Write-Host '  $env:PATH = "$PWD\.venv\Scripts;$env:PATH"'
-    Write-Host '  dotnet run -- --login'
+    Write-Host 'Este PC todavía no tiene una sesión guardada de Garmin.' -ForegroundColor Yellow
+    Write-Host 'Tus credenciales se enviarán directamente a Garmin y no se guardarán en el proyecto.'
+    Write-Host 'No compartas con nadie tu contraseña, código MFA ni tokens.'
+    Write-Host ''
+    $loginAnswer = Read-Host 'Pulsa Intro para iniciar sesión ahora o escribe N para hacerlo más tarde'
+    if ($loginAnswer -notmatch '^(?i:n|no)$') {
+        Write-Host ''
+        Write-Host 'Iniciando el acceso seguro a Garmin...' -ForegroundColor Yellow
+        $previousPath = $env:PATH
+        try {
+            $env:PATH = "$(Join-Path $projectRoot '.venv\Scripts');$env:PATH"
+            & $dotnetExe run `
+                --project (Join-Path $projectRoot 'GarminDataExport.csproj') `
+                -- `
+                --login
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning 'No se pudo completar el inicio de sesión. Puedes ejecutar Instalar.bat otra vez para reintentarlo.'
+            } else {
+                Write-Host 'La sesión de Garmin se ha guardado correctamente.' -ForegroundColor Green
+            }
+        } finally {
+            $env:PATH = $previousPath
+        }
+    } else {
+        Write-Host 'Inicio de sesión aplazado. Ejecuta Instalar.bat otra vez cuando quieras completarlo.' -ForegroundColor Yellow
+    }
+} else {
+    Write-Host 'Sesión de Garmin encontrada.' -ForegroundColor Green
 }
 
 Write-Host ''
-Write-Host 'Double-click GarminLauncher.exe to export or update your data.'
+Write-Host 'Para utilizar el programa, haz doble clic en GarminLauncher.exe.' -ForegroundColor Cyan
