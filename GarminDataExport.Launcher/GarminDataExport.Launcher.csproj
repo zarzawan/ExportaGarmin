@@ -8,12 +8,12 @@
     <Nullable>enable</Nullable>
     <RootNamespace>GarminDataExport.Launcher</RootNamespace>
     <AssemblyName>GarminLauncher</AssemblyName>
-    <Version>1.1.0</Version>
-    <AssemblyVersion>1.1.0.0</AssemblyVersion>
-    <FileVersion>1.1.0.0</FileVersion>
+    <Version>1.2.0</Version>
+    <AssemblyVersion>1.2.0.0</AssemblyVersion>
+    <FileVersion>1.2.0.0</FileVersion>
     <Product>Exportador de datos de Garmin</Product>
     <AssemblyTitle>Exportador de datos de Garmin</AssemblyTitle>
-    <Description>Lanzador gráfico en castellano para exportaciones incrementales de Garmin Connect.</Description>
+    <Description>Lanzador gráfico en castellano para exportaciones de Garmin Connect preparadas para IA.</Description>
     <Authors>zarzawan</Authors>
     <NeutralLanguage>es-ES</NeutralLanguage>
   </PropertyGroup>

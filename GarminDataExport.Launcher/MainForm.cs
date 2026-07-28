@@ -6,10 +6,12 @@ namespace GarminDataExport.Launcher;
 
 internal sealed class MainForm : Form
 {
-    private static readonly (string English, string Spanish)[] SectionTranslations =
+    private static readonly (string Original, string Traduccion)[] SectionTranslations =
     [
+        ("Export Metadata", "Metadatos de la exportación"),
         ("Profile", "Perfil"),
         ("Daily Health", "Salud diaria"),
+        ("Blood Pressure", "Presión arterial"),
         ("Activities", "Actividades"),
         ("Body Composition", "Composición corporal"),
         ("Training Metrics", "Métricas de entrenamiento"),
@@ -20,10 +22,15 @@ internal sealed class MainForm : Form
         ("Workouts", "Entrenamientos"),
         ("Hydration", "Hidratación"),
         ("Nutrition", "Nutrición"),
+        ("Weekly Summary", "Resumen semanal"),
+        ("Data Quality", "Calidad de los datos"),
         ("Women's Health", "Salud femenina"),
     ];
 
     private readonly DateTimePicker _startDatePicker = new();
+    private readonly DateTimePicker _endDatePicker = new();
+    private readonly TextBox _fileNameTextBox = new();
+    private readonly CheckBox _includeActivityDetailsCheckBox = new();
     private readonly Button _runButton = new();
     private readonly Button _openFolderButton = new();
     private readonly Button _openFileButton = new();
@@ -40,8 +47,8 @@ internal sealed class MainForm : Form
     {
         Text = "Exportador de datos de Garmin";
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(760, 540);
-        Size = new Size(840, 620);
+        MinimumSize = new Size(800, 620);
+        Size = new Size(900, 700);
         Font = new Font("Segoe UI", 10F);
 
         BuildInterface();
@@ -56,14 +63,10 @@ internal sealed class MainForm : Form
             Dock = DockStyle.Fill,
             Padding = new Padding(20),
             ColumnCount = 1,
-            RowCount = 7,
+            RowCount = 9,
         };
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        for (var row = 0; row < 8; row++)
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
         Controls.Add(layout);
 
@@ -79,9 +82,9 @@ internal sealed class MainForm : Form
         var explanation = new Label
         {
             AutoSize = true,
-            MaximumSize = new Size(760, 0),
-            Text = "Selecciona la primera fecha que quieres conservar. La primera ejecución puede tardar; " +
-                   "las siguientes reutilizan la caché y actualizan un único archivo.",
+            MaximumSize = new Size(820, 0),
+            Text = "Selecciona un intervalo. La caché evita repetir descargas. El archivo compacto " +
+                   "está preparado para analizar el entrenamiento con una IA.",
             Margin = new Padding(0, 0, 0, 16),
         };
         layout.Controls.Add(explanation);
@@ -104,8 +107,46 @@ internal sealed class MainForm : Form
         _startDatePicker.MinDate = new DateTime(2000, 1, 1);
         _startDatePicker.MaxDate = DateTime.Today;
         _startDatePicker.Width = 140;
+        _startDatePicker.ValueChanged += DatePicker_ValueChanged;
         datePanel.Controls.Add(_startDatePicker);
+        datePanel.Controls.Add(new Label
+        {
+            AutoSize = true,
+            Text = "Hasta:",
+            Margin = new Padding(24, 7, 10, 0),
+        });
+        _endDatePicker.Format = DateTimePickerFormat.Short;
+        _endDatePicker.MinDate = new DateTime(2000, 1, 1);
+        _endDatePicker.MaxDate = DateTime.Today;
+        _endDatePicker.Width = 140;
+        _endDatePicker.ValueChanged += DatePicker_ValueChanged;
+        datePanel.Controls.Add(_endDatePicker);
         layout.Controls.Add(datePanel);
+
+        var filePanel = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            Dock = DockStyle.Fill,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = new Padding(0, 0, 0, 8),
+        };
+        filePanel.Controls.Add(new Label
+        {
+            AutoSize = true,
+            Text = "Nombre del archivo:",
+            Margin = new Padding(0, 7, 10, 0),
+        });
+        _fileNameTextBox.Width = 470;
+        _fileNameTextBox.TextChanged += (_, _) => RefreshOutputState();
+        filePanel.Controls.Add(_fileNameTextBox);
+        layout.Controls.Add(filePanel);
+
+        _includeActivityDetailsCheckBox.AutoSize = true;
+        _includeActivityDetailsCheckBox.Text =
+            "Incluir el máximo detalle temporal de las actividades (archivos mucho mayores)";
+        _includeActivityDetailsCheckBox.Margin = new Padding(0, 0, 0, 12);
+        layout.Controls.Add(_includeActivityDetailsCheckBox);
 
         var buttonPanel = new FlowLayoutPanel
         {
@@ -116,7 +157,7 @@ internal sealed class MainForm : Form
             Margin = new Padding(0, 0, 0, 12),
         };
 
-        _runButton.Text = "Crear o actualizar";
+        _runButton.Text = "Crear exportación";
         _runButton.AutoSize = true;
         _runButton.Padding = new Padding(12, 5, 12, 5);
         _runButton.Click += RunButton_Click;
@@ -178,6 +219,24 @@ internal sealed class MainForm : Form
             return;
         }
 
+        if (_startDatePicker.Value.Date > _endDatePicker.Value.Date)
+        {
+            ShowError("La fecha inicial no puede ser posterior a la fecha final.");
+            return;
+        }
+
+        string outputFileName;
+        try
+        {
+            outputFileName = NormaliseFileName(_fileNameTextBox.Text);
+            _fileNameTextBox.Text = outputFileName;
+        }
+        catch (ArgumentException ex)
+        {
+            ShowError(ex.Message);
+            return;
+        }
+
         var tokenDirectory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
             ".garminconnect");
@@ -192,6 +251,11 @@ internal sealed class MainForm : Form
         SetRunningState(true);
         _logBox.Clear();
         AppendLog($"Fecha inicial: {_startDatePicker.Value:yyyy-MM-dd}");
+        AppendLog($"Fecha final: {_endDatePicker.Value:yyyy-MM-dd}");
+        AppendLog($"Archivo: {outputFileName}");
+        AppendLog(_includeActivityDetailsCheckBox.Checked
+            ? "Detalle temporal de actividades: incluido."
+            : "Detalle temporal de actividades: omitido para reducir el tamaño.");
         AppendLog("La caché interna se reutilizará para evitar descargas repetidas.");
 
         try
@@ -200,7 +264,7 @@ internal sealed class MainForm : Form
 
             var pythonPath = Path.Combine(_projectRoot, ".venv", "Scripts", "python.exe");
             var scriptPath = Path.Combine(_projectRoot, "garmin_export.py");
-            var startedAtUtc = DateTime.UtcNow;
+            _currentExportPath = Path.Combine(_outputDirectory, outputFileName);
 
             var startInfo = new ProcessStartInfo
             {
@@ -216,9 +280,16 @@ internal sealed class MainForm : Form
             startInfo.ArgumentList.Add("--start-date");
             startInfo.ArgumentList.Add(_startDatePicker.Value.ToString(
                 "yyyy-MM-dd", CultureInfo.InvariantCulture));
+            startInfo.ArgumentList.Add("--end-date");
+            startInfo.ArgumentList.Add(_endDatePicker.Value.ToString(
+                "yyyy-MM-dd", CultureInfo.InvariantCulture));
             startInfo.ArgumentList.Add("--compact");
+            if (_includeActivityDetailsCheckBox.Checked)
+                startInfo.ArgumentList.Add("--activity-details");
             startInfo.ArgumentList.Add("--output");
             startInfo.ArgumentList.Add(_outputDirectory);
+            startInfo.ArgumentList.Add("--filename");
+            startInfo.ArgumentList.Add(outputFileName);
 
             using var process = new Process { StartInfo = startInfo };
             if (!process.Start())
@@ -233,30 +304,23 @@ internal sealed class MainForm : Form
                 throw new InvalidOperationException(
                     $"El exportador terminó con el código {process.ExitCode}. Revisa el registro.");
 
-            var newExport = Directory
-                .EnumerateFiles(_outputDirectory, "garmin_export_*.txt")
-                .Where(path => File.GetLastWriteTimeUtc(path) >= startedAtUtc.AddSeconds(-5))
-                .OrderByDescending(File.GetLastWriteTimeUtc)
-                .FirstOrDefault();
-            if (newExport is null)
+            if (!File.Exists(_currentExportPath))
                 throw new FileNotFoundException("La exportación terminó, pero no se encontró el archivo generado.");
 
-            ReplaceCurrentExport(newExport);
-            CleanupTimestampedExports();
             RefreshOutputState();
 
-            _statusLabel.Text = "Actualización completada";
-            AppendLog($"Archivo actual: {_currentExportPath}");
+            _statusLabel.Text = "Exportación completada";
+            AppendLog($"Archivo creado: {_currentExportPath}");
             MessageBox.Show(
                 this,
-                "La exportación se actualizó correctamente.",
+                $"La exportación se guardó correctamente como:\n{outputFileName}",
                 "Exportador de datos de Garmin",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
         }
         catch (Exception ex)
         {
-            _statusLabel.Text = "La actualización no se completó";
+            _statusLabel.Text = "La exportación no se completó";
             AppendLog($"ERROR: {ex.Message}");
             ShowError(ex.Message);
         }
@@ -274,8 +338,8 @@ internal sealed class MainForm : Form
 
     private static string TranslateVisibleLogLine(string line)
     {
-        foreach (var (english, spanish) in SectionTranslations)
-            line = line.Replace(english, spanish, StringComparison.Ordinal);
+        foreach (var (original, traduccion) in SectionTranslations)
+            line = line.Replace(original, traduccion, StringComparison.Ordinal);
         return line;
     }
 
@@ -288,27 +352,6 @@ internal sealed class MainForm : Form
         }
 
         _logBox.AppendText(line + Environment.NewLine);
-    }
-
-    private void ReplaceCurrentExport(string generatedExport)
-    {
-        if (_outputDirectory is null)
-            throw new InvalidOperationException("No se encontró la carpeta de salida.");
-
-        var replacementPath = Path.Combine(_outputDirectory, "garmin_actual.new");
-        var currentPath = Path.Combine(_outputDirectory, "garmin_actual.txt");
-
-        File.Move(generatedExport, replacementPath, true);
-        File.Move(replacementPath, currentPath, true);
-    }
-
-    private void CleanupTimestampedExports()
-    {
-        if (_outputDirectory is null)
-            return;
-
-        foreach (var path in Directory.EnumerateFiles(_outputDirectory, "garmin_export_*.txt"))
-            File.Delete(path);
     }
 
     private void LocateProject()
@@ -333,14 +376,17 @@ internal sealed class MainForm : Form
         if (_outputDirectory is null)
             return;
 
-        _currentExportPath = Path.Combine(_outputDirectory, "garmin_actual.txt");
-        _outputLabel.Text = $"Archivo único: {_currentExportPath}";
+        var fileName = string.IsNullOrWhiteSpace(_fileNameTextBox.Text)
+            ? BuildDefaultFileName()
+            : _fileNameTextBox.Text.Trim();
+        _currentExportPath = Path.Combine(_outputDirectory, fileName);
+        _outputLabel.Text = $"Se guardará en: {_currentExportPath}";
         _openFolderButton.Enabled = true;
         _openFileButton.Enabled = File.Exists(_currentExportPath);
         if (_statusLabel.Text is "Preparando…")
         {
             _statusLabel.Text = File.Exists(_currentExportPath)
-                ? "Listo para actualizar"
+                ? "Listo para sustituir ese archivo"
                 : "Listo para la primera exportación";
         }
     }
@@ -398,6 +444,9 @@ internal sealed class MainForm : Form
     {
         _runButton.Enabled = !isRunning;
         _startDatePicker.Enabled = !isRunning;
+        _endDatePicker.Enabled = !isRunning;
+        _fileNameTextBox.Enabled = !isRunning;
+        _includeActivityDetailsCheckBox.Enabled = !isRunning;
         _openFolderButton.Enabled = !isRunning && _outputDirectory is not null;
         _openFileButton.Enabled = !isRunning &&
                                   _currentExportPath is not null &&
@@ -416,7 +465,10 @@ internal sealed class MainForm : Form
 
     private void LoadLauncherSettings()
     {
-        var defaultDate = DateTime.Today.AddDays(-30);
+        var defaultStartDate = DateTime.Today.AddDays(-30);
+        var defaultEndDate = DateTime.Today;
+        var includeActivityDetails = false;
+        string? savedFileName = null;
         try
         {
             if (File.Exists(LauncherSettingsPath))
@@ -424,7 +476,13 @@ internal sealed class MainForm : Form
                 var settings = JsonSerializer.Deserialize<LauncherSettings>(
                     File.ReadAllText(LauncherSettingsPath));
                 if (settings is not null)
-                    defaultDate = settings.StartDate.Date;
+                {
+                    defaultStartDate = settings.StartDate.Date;
+                    if (settings.EndDate.Year >= 2000)
+                        defaultEndDate = settings.EndDate.Date;
+                    includeActivityDetails = settings.IncludeActivityDetails;
+                    savedFileName = settings.FileName;
+                }
             }
         }
         catch
@@ -432,18 +490,28 @@ internal sealed class MainForm : Form
             // Un archivo de preferencias dañado no debe impedir que se abra el lanzador.
         }
 
-        if (defaultDate < _startDatePicker.MinDate)
-            defaultDate = _startDatePicker.MinDate;
-        if (defaultDate > _startDatePicker.MaxDate)
-            defaultDate = _startDatePicker.MaxDate;
-        _startDatePicker.Value = defaultDate;
+        defaultStartDate = ClampDate(defaultStartDate, _startDatePicker);
+        defaultEndDate = ClampDate(defaultEndDate, _endDatePicker);
+        if (defaultStartDate > defaultEndDate)
+            defaultStartDate = defaultEndDate;
+
+        _startDatePicker.Value = defaultStartDate;
+        _endDatePicker.Value = defaultEndDate;
+        _includeActivityDetailsCheckBox.Checked = includeActivityDetails;
+        _fileNameTextBox.Text = string.IsNullOrWhiteSpace(savedFileName)
+            ? BuildDefaultFileName()
+            : savedFileName;
     }
 
     private void SaveLauncherSettings()
     {
         var settingsDirectory = Path.GetDirectoryName(LauncherSettingsPath)!;
         Directory.CreateDirectory(settingsDirectory);
-        var settings = new LauncherSettings(_startDatePicker.Value.Date);
+        var settings = new LauncherSettings(
+            _startDatePicker.Value.Date,
+            _endDatePicker.Value.Date,
+            _includeActivityDetailsCheckBox.Checked,
+            NormaliseFileName(_fileNameTextBox.Text));
         File.WriteAllText(
             LauncherSettingsPath,
             JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true }));
@@ -459,5 +527,50 @@ internal sealed class MainForm : Form
             MessageBoxIcon.Error);
     }
 
-    private sealed record LauncherSettings(DateTime StartDate);
+    private void DatePicker_ValueChanged(object? sender, EventArgs e)
+    {
+        if (_startDatePicker.Value.Date > _endDatePicker.Value.Date)
+        {
+            if (ReferenceEquals(sender, _startDatePicker))
+                _endDatePicker.Value = _startDatePicker.Value.Date;
+            else
+                _startDatePicker.Value = _endDatePicker.Value.Date;
+        }
+
+        _fileNameTextBox.Text = BuildDefaultFileName();
+    }
+
+    private string BuildDefaultFileName() =>
+        $"garmin_datos_{_startDatePicker.Value:yyyy-MM-dd}_a_{_endDatePicker.Value:yyyy-MM-dd}.txt";
+
+    private static DateTime ClampDate(DateTime value, DateTimePicker picker)
+    {
+        if (value < picker.MinDate)
+            return picker.MinDate;
+        if (value > picker.MaxDate)
+            return picker.MaxDate;
+        return value;
+    }
+
+    private static string NormaliseFileName(string value)
+    {
+        var name = value.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("Escribe un nombre para el archivo.");
+        if (!string.Equals(name, Path.GetFileName(name), StringComparison.Ordinal) ||
+            name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        {
+            throw new ArgumentException(
+                "El nombre no puede incluir carpetas ni caracteres no permitidos por Windows.");
+        }
+        if (!name.EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
+            name += ".txt";
+        return name;
+    }
+
+    private sealed record LauncherSettings(
+        DateTime StartDate,
+        DateTime EndDate,
+        bool IncludeActivityDetails,
+        string? FileName);
 }

@@ -1,4 +1,4 @@
-# === Garmin data & credentials (NEVER commit) ===
+# === Datos y credenciales de Garmin (NO subir nunca) ===
 export/
 .env
 *.env
@@ -15,14 +15,14 @@ build/
 .eggs/
 *.whl
 
-# === Virtual environments ===
+# === Entornos virtuales ===
 venv/
 .venv/
 env/
 .env/
 ENV/
 
-# === IDE / Editor ===
+# === Editores y entornos de desarrollo ===
 .vscode/
 .idea/
 *.swp
@@ -31,13 +31,13 @@ ENV/
 .project
 .classpath
 
-# === OS files ===
+# === Archivos del sistema operativo ===
 Thumbs.db
 Desktop.ini
 .DS_Store
 ._*
 
-# === Logs & temp ===
+# === Registros y archivos temporales ===
 *.log
 *.tmp
 *.bak

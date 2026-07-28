@@ -12,14 +12,34 @@ INSTALACIÓN
 
 USO
 
-1. Elige la fecha desde la que quieres descargar tus datos.
-2. Pulsa "Crear o actualizar".
-3. Espera hasta que aparezca "Actualización completada".
-4. Pulsa "Abrir archivo" para ver el resultado.
+1. Elige las fechas inicial y final. Ambas se descargarán.
+2. Revisa el nombre propuesto. Puedes cambiarlo.
+3. Para el uso normal, deja desmarcado el detalle temporal.
+4. Pulsa "Crear exportación".
+5. Espera hasta que aparezca "Exportación completada".
+6. Pulsa "Abrir archivo" para ver el resultado.
 
-El archivo actualizado queda en:
+El archivo queda en "export\managed" con un nombre como:
 
-export\managed\garmin_actual.txt
+garmin_datos_2026-01-01_a_2026-07-28.txt
+
+La exportación incluye la presión arterial disponible en Garmin.
+
+El archivo normal está preparado para analizar el entrenamiento con una IA:
+conserva actividades, vueltas, zonas, sueño, VFC, autoevaluación y
+zapatillas o bicicletas, pero elimina nombres, coordenadas, números de serie,
+catálogos vacíos e información duplicada.
+
+Si Garmin no tiene sueño, VFC, presión arterial, hidratación o nutrición para
+una fecha, el programa no inventa valores. La sección "Data Quality"
+(calidad de los datos) explica qué información falta.
+
+La opción de máximo detalle conserva las muestras de cada actividad con la
+resolución registrada por el reloj. Úsala para periodos cortos porque aumenta
+mucho el tamaño del archivo.
 
 Si algo falla, cierra GarminLauncher.exe y ejecuta Instalar.bat otra vez.
 La guía completa está en README.md.
+
+Este programa es gratuito, no oficial y está basado en el proyecto
+sirredbeard/garmin-data-export. Utilízalo únicamente con tu propia cuenta.
