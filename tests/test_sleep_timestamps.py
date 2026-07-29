@@ -222,8 +222,10 @@ class CompactSleepTimestampTests(unittest.TestCase):
                 output = Path(temp_dir)
                 cache = ExportCache(output, enabled=True)
                 cache.put_day("2026-07-24", {"sleep": self.sleep_fixture()})
+                api = Mock()
+                api.get_sleep_data.return_value = self.sleep_fixture()
                 exporter = GarminExporter(
-                    api=Mock(),
+                    api=api,
                     out_dir=output,
                     days=1,
                     max_activities=1,

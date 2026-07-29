@@ -73,7 +73,12 @@ def compact_activity_fixture(activity_id=1, include_series=True):
             {"zoneNumber": 1, "secsInZone": 10, "zoneLowBoundary": 90}
         ],
         "details": activity_series_fixture() if include_series else None,
-        "gear": [{"uuid": "equipo-1", "displayName": "Zapatillas anónimas"}],
+        "gear": [{
+            "uuid": "equipo-1",
+            "displayName": "Zapatillas anónimas",
+            "gearMakeName": "Saucony",
+            "gearModelName": "Endorphin Speed 4",
+        }],
     }
 
 
@@ -89,18 +94,42 @@ class PositionalSeriesTests(unittest.TestCase):
 
     def test_initial_null_does_not_shift_columns(self):
         series = _compact_activity_series(activity_series_fixture())
-        self.assertEqual([1000.0, None, 0.0, 2.0], series["samples"][0])
+        self.assertEqual([None, 0.0, 2.0], series["samples"][0])
 
     def test_intermediate_null_does_not_shift_columns(self):
         series = _compact_activity_series(activity_series_fixture())
-        self.assertEqual([2000.0, 80.0, 10.0, None], series["samples"][1])
+        self.assertEqual([80.0, 10.0, None], series["samples"][1])
 
     def test_invalid_row_is_omitted_and_reported(self):
         fixture = activity_series_fixture()
-        fixture["activityDetailMetrics"].append({"notMetrics": []})
+        fixture["activityDetailMetrics"].insert(2, {"notMetrics": []})
         diagnostics = []
-        self.assertIsNone(_compact_activity_series(fixture, diagnostics))
+        series = _compact_activity_series(fixture, diagnostics)
+        self.assertIsNotNone(series)
+        self.assertEqual(4, len(series["samples"]))
+        self.assertEqual([None, 20.0, 2.2], series["samples"][2])
         self.assertTrue(diagnostics)
+
+    def test_negative_descriptor_index_is_never_used(self):
+        fixture = activity_series_fixture()
+        fixture["metricDescriptors"].insert(1, {
+            "metricsIndex": -1,
+            "key": "directHeartRate",
+            "unit": {"key": "bpm"},
+        })
+        diagnostics = []
+
+        series = _compact_activity_series(fixture, diagnostics)
+
+        self.assertEqual(
+            ["heart_rate_raw", "duration_raw", "speed_raw"],
+            [
+                descriptor["field"]
+                for descriptor in series["metric_descriptors"]
+            ],
+        )
+        self.assertEqual([None, 0.0, 2.0], series["samples"][0])
+        self.assertTrue(any("índice no válido" in item for item in diagnostics))
 
 
 class UnitConversionTests(unittest.TestCase):
@@ -303,7 +332,12 @@ class RegressionTests(unittest.TestCase):
 
     def test_gear_remains_associated(self):
         result = _compact_activity(compact_activity_fixture())
-        self.assertEqual("Zapatillas anónimas", result["gear"][0]["name"])
+        gear = result["gear"][0]
+        self.assertRegex(gear["gear_ref"], r"^gear_[0-9a-f]{12}$")
+        self.assertEqual("Zapatillas anónimas", gear["gear_name"])
+        self.assertEqual("Saucony", gear["manufacturer"])
+        self.assertEqual("Endorphin Speed 4", gear["model"])
+        self.assertNotIn("custom_name", gear)
 
     def test_future_metrics_stay_in_current_snapshot(self):
         result, _ = _compact_training(

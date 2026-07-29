@@ -1,12 +1,12 @@
 @echo off
 chcp 65001 >nul
 setlocal
-title Instalación del exportador de datos de Garmin
+title Instalación de EntrenaIA
 cd /d "%~dp0"
 
 echo.
 echo ============================================================
-echo   Instalación del exportador de datos de Garmin
+echo   EntrenaIA - Exportador de Garmin para IA
 echo ============================================================
 echo.
 echo No cierres esta ventana. La primera instalación puede tardar

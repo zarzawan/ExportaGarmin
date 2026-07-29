@@ -1,3 +1,4 @@
 garminconnect
 garth
+openpyxl==3.1.5
 tzdata; platform_system == "Windows"

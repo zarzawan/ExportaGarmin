@@ -1,8 +1,9 @@
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from tempfile import TemporaryDirectory
+from unittest.mock import Mock, patch
 
-from garmin_export import _persist_auth_tokens
+from garmin_export import _persist_auth_tokens, authenticate
 
 
 class AuthTokenStorageTests(unittest.TestCase):
@@ -27,6 +28,19 @@ class AuthTokenStorageTests(unittest.TestCase):
     def test_rejects_unknown_token_storage_api(self):
         with self.assertRaisesRegex(RuntimeError, "no se encontró la función para guardar tokens"):
             _persist_auth_tokens(object(), Path("tokens"))
+
+    def test_non_interactive_auth_never_reads_environment_credentials(self):
+        with TemporaryDirectory() as directory:
+            tokenstore = Path(directory) / "sesion-inexistente"
+            with patch("garmin_export._load_env_file") as load_env:
+                with self.assertRaisesRegex(RuntimeError, "sesión válida"):
+                    authenticate(
+                        str(tokenstore),
+                        use_credential_environment=True,
+                        interactive=False,
+                    )
+
+            load_env.assert_not_called()
 
 
 if __name__ == "__main__":

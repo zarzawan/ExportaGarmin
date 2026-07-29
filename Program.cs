@@ -1,13 +1,20 @@
 ﻿using System.Diagnostics;
 
-var scriptPath = Path.Combine(AppContext.BaseDirectory, "garmin_export.py");
+var scriptPath = Path.Combine(Directory.GetCurrentDirectory(), "garmin_export.py");
 if (!File.Exists(scriptPath))
-    scriptPath = Path.Combine(Directory.GetCurrentDirectory(), "garmin_export.py");
+    scriptPath = Path.Combine(AppContext.BaseDirectory, "garmin_export.py");
 
-var pythonCommand = await FindPythonAsync();
+var localVenvPython = Path.Combine(
+    Directory.GetCurrentDirectory(),
+    ".venv",
+    "Scripts",
+    "python.exe");
+var pythonCommand = await IsPython311Async(localVenvPython)
+    ? localVenvPython
+    : await FindPythonAsync();
 if (pythonCommand is null)
 {
-    Console.Error.WriteLine("Python no está instalado.");
+    Console.Error.WriteLine("Python 3.11 no está instalado o no funciona.");
     if (!await TryInstallPythonAsync())
     {
         Console.Error.WriteLine("No se pudo instalar Python automáticamente. Ejecuta Instalar.bat para preparar la aplicación.");
@@ -46,27 +53,8 @@ static async Task<string?> FindPythonAsync()
     // Probar primero "python" y después "python3".
     foreach (var candidate in new[] { "python", "python3" })
     {
-        try
-        {
-            var psi = new ProcessStartInfo
-            {
-                FileName = candidate,
-                ArgumentList = { "--version" },
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-            using var proc = Process.Start(psi);
-            if (proc is null) continue;
-            await proc.WaitForExitAsync();
-            if (proc.ExitCode == 0)
-                return candidate;
-        }
-        catch
-        {
-            // No se encontró; probar la siguiente opción.
-        }
+        if (await IsPython311Async(candidate))
+            return candidate;
     }
 
     // Comprobar ubicaciones habituales de Windows cuando PATH no está configurado.
@@ -98,31 +86,39 @@ static async Task<string?> FindPythonAsync()
 
         foreach (var exe in candidates)
         {
-            try
-            {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = exe,
-                    ArgumentList = { "--version" },
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                };
-                using var proc = Process.Start(psi);
-                if (proc is null) continue;
-                await proc.WaitForExitAsync();
-                if (proc.ExitCode == 0)
-                    return exe;
-            }
-            catch
-            {
-                // Ignorar instalaciones que no funcionan.
-            }
+            if (await IsPython311Async(exe))
+                return exe;
         }
     }
 
     return null;
+}
+
+static async Task<bool> IsPython311Async(string candidate)
+{
+    try
+    {
+        var psi = new ProcessStartInfo
+        {
+            FileName = candidate,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        psi.ArgumentList.Add("-c");
+        psi.ArgumentList.Add(
+            "import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 11) else 1)");
+        using var process = Process.Start(psi);
+        if (process is null)
+            return false;
+        await process.WaitForExitAsync();
+        return process.ExitCode == 0;
+    }
+    catch
+    {
+        return false;
+    }
 }
 
 static async Task<bool> TryInstallPythonAsync()

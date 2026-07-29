@@ -1,394 +1,467 @@
-# Exportador de datos de Garmin para Windows
+# EntrenaIA
 
-Aplicación gratuita y de código abierto para descargar tus propios datos de
-Garmin Connect, guardarlos de forma incremental y preparar un archivo fácil de
-analizar con ChatGPT, NotebookLM, Claude u otra IA.
+**Exportador de Garmin para IA.** Aplicación gratuita para Windows que
+descarga tus datos de Garmin Connect y crea un archivo ordenado para revisarlo
+manualmente con ChatGPT, NotebookLM, Claude u otra IA.
 
-Está pensada especialmente para personas que quieren relacionar entrenamiento,
-descanso, sensaciones y recuperación —por ejemplo durante la preparación de
-una maratón— sin tener que entender Python, .NET, JSON ni la línea de comandos.
+Está pensada para preparar una carrera —por ejemplo, una maratón o media
+maratón— sin tener que saber programación. La ventana incluye un asistente de
+primer uso y una guía corta con la rutina diaria, semanal y mensual.
 
-Esta edición permite descargar una copia local de tus datos de Garmin Connect
-mediante una ventana sencilla. Puedes elegir las fechas inicial y final,
-guardar el resultado con un nombre comprensible e incluir, si lo necesitas,
-el máximo detalle temporal registrado durante las actividades.
-
-La aplicación mantiene la capa .NET del proyecto original y utiliza Python
-internamente para comunicarse con Garmin Connect.
-
-El formato predeterminado es un **compacto semántico** pensado para analizar
-entrenamientos con una IA: conserva las métricas deportivas importantes,
-elimina duplicados y excluye nombres, coordenadas, identificadores personales
-y números de serie. El modo completo continúa disponible mediante la línea de
-comandos cuando se necesiten las respuestas originales sin transformar de
-Garmin.
+El programa se conecta a Garmin Connect para descargar tus datos. **No sube
+archivos automáticamente a ninguna IA**: tú eliges qué archivo compartes y con
+quién.
 
 > [!IMPORTANT]
-> Este es un proyecto personal y no oficial. No pertenece a Garmin ni está
-> respaldado por Garmin. Utilízalo únicamente con tu propia cuenta.
+> EntrenaIA es un proyecto personal y no oficial: no pertenece a Garmin, no
+> está afiliado a Garmin ni cuenta con su respaldo. Utilízalo únicamente con
+> tu propia cuenta.
 
-Esta versión está basada en el proyecto original
-[sirredbeard/garmin-data-export](https://github.com/sirredbeard/garmin-data-export)
-y mantiene su licencia Apache 2.0 y la atribución correspondiente.
+Esta edición parte de
+[sirredbeard/garmin-data-export](https://github.com/sirredbeard/garmin-data-export),
+mantiene la capa .NET y conserva la licencia Apache 2.0.
 
-## Qué puedes hacer con él
+## Lo más sencillo: instalar y usar
 
-- Elegir una fecha inicial y otra final desde una ventana.
-- Descargar salud diaria, actividades, vueltas, zonas, sueño, VFC, peso,
-  presión arterial, autoevaluaciones y equipamiento, cuando Garmin los tenga.
-- Reutilizar una caché para no descargar repetidamente lo mismo.
-- Crear un archivo compacto y privado para una revisión semanal con una IA.
-- Añadir las muestras temporales de las actividades cuando necesites analizar
-  una sesión concreta con más detalle.
-- Mantener una copia local de tus datos sin subir credenciales ni actividades
-  a este repositorio.
+Necesitas Windows 11, conexión a Internet y una cuenta de Garmin Connect.
 
-El programa no crea planes de entrenamiento ni toma decisiones médicas. Se
-limita a descargar, ordenar y explicar los datos que Garmin proporciona.
+### 1. Descargar
 
-## Instalación en dos minutos
+1. Pulsa el botón verde **Code** de GitHub.
+2. Pulsa **Download ZIP**.
+3. Abre la carpeta **Descargas**.
+4. Pulsa con el botón derecho sobre el ZIP y elige **Extraer todo**.
+5. Entra en la carpeta extraída.
 
-Si no tienes conocimientos informáticos, este es el resumen:
-
-1. Pulsa el botón verde **Code** de GitHub y después **Download ZIP**.
-2. Extrae por completo el ZIP.
-3. Haz doble clic en `Instalar.bat`.
-4. Espera a que termine y sigue las preguntas de la ventana negra.
-5. Haz doble clic en `GarminLauncher.exe`.
-
-La explicación detallada, incluidos los posibles avisos de Windows, está justo
-debajo.
-
-## Instalación fácil
-
-Estos pasos están pensados para una persona sin conocimientos informáticos.
-Solo necesitas un PC con Windows 11, conexión a Internet, una cuenta de Garmin
-Connect y acceso a este repositorio público de GitHub.
-
-### 1. Descargar el programa
-
-1. Abre `https://github.com/zarzawan/garmin-data-export`.
-2. Pulsa el botón verde **Code**.
-3. Pulsa **Download ZIP**. No necesitas una cuenta de GitHub.
-4. Abre la carpeta **Descargas** de Windows.
-5. Pulsa con el botón derecho sobre el archivo ZIP y elige **Extraer todo**.
-6. Entra en la carpeta que Windows acaba de crear.
-
-Es importante extraer el ZIP. El instalador no funcionará correctamente si se
-ejecuta desde dentro del archivo comprimido.
+No ejecutes el instalador desde dentro del ZIP.
 
 ### 2. Instalar
 
 1. Haz doble clic en `Instalar.bat`.
-2. Si Windows muestra una advertencia, revisa que el archivo procede de tu
-   descarga de este repositorio público. Después pulsa **Más información** y
-   **Ejecutar de todas formas**.
-3. Deja abierta la ventana negra mientras termina la instalación.
-4. Acepta las ventanas de Windows que soliciten permiso para instalar Python o
-   .NET.
+2. Mantén abierta la ventana negra mientras trabaja.
+3. Acepta las ventanas de Windows si necesita instalar Python o .NET.
+4. Espera hasta que indique que la instalación ha terminado.
 
-El instalador se encarga automáticamente de:
+El instalador comprueba e instala únicamente lo necesario:
 
-- instalar Python 3.11 si falta;
-- instalar el SDK de .NET 11 si falta;
-- crear el entorno privado `.venv`;
-- instalar las dependencias comprobadas;
-- compilar la aplicación;
-- crear `GarminLauncher.exe`.
+- Python 3.11;
+- SDK de .NET 11;
+- entorno privado `.venv`;
+- dependencias comprobadas;
+- aplicación gráfica `GarminLauncher.exe`.
 
-La primera instalación puede tardar varios minutos.
+La primera instalación puede tardar varios minutos. Si Windows protege la
+ejecución, comprueba que descargaste los archivos de este repositorio y utiliza
+**Más información > Ejecutar de todas formas**.
 
-### 3. Iniciar sesión en Garmin
+### 3. Abrir por primera vez
 
-Si este PC todavía no tiene una sesión guardada, el instalador te preguntará
-si quieres iniciar sesión.
+1. Haz doble clic en `GarminLauncher.exe`.
+2. Sigue el asistente **Primeros pasos**.
+3. Elige un nombre sencillo para tu perfil.
+4. Pulsa **Iniciar sesión en Garmin**.
+5. Escribe el correo, la contraseña y el MFA únicamente en la ventana negra
+   que se abre.
+6. Vuelve al asistente y pulsa **Comprobar de nuevo**.
+7. Configura tu carrera si ya conoces la distancia y la fecha.
 
-1. Pulsa **Intro** para continuar.
-2. Escribe tu correo de Garmin y pulsa **Intro**.
-3. Escribe tu contraseña y pulsa **Intro**. La contraseña no aparecerá en
-   pantalla mientras escribes; es normal.
-4. Si utilizas verificación en dos pasos, escribe el código de tu aplicación
-   de autenticación.
+Nunca escribas tu contraseña, MFA, cookies o tokens en un chat, una incidencia
+de GitHub o un archivo del proyecto.
 
-Las credenciales se envían directamente al inicio de sesión de Garmin. El
-proyecto no las guarda. Los tokens de sesión quedan fuera del repositorio, en:
+### 4. Crear el primer archivo
+
+1. Sincroniza antes el reloj con Garmin Connect.
+2. Abre la pestaña **Revisión recomendada**.
+3. Deja seleccionado **Texto con JSON (.txt) — recomendado para IA**.
+4. Pulsa **Crear archivo para la IA**.
+5. Cuando termine, pulsa **Abrir archivo** o **Abrir carpeta**.
+6. Sube manualmente el archivo a la IA que prefieras.
+7. Pulsa **Copiar pregunta para la IA** y pégala en la conversación.
+
+El programa propone 16 semanas para maratón y otros objetivos, y 12 para media
+maratón. Si todavía no has indicado una carrera, utiliza también 16 semanas.
+El archivo nuevo es autocontenido: normalmente puedes sustituir el de la
+semana anterior en vez de acumular cientos de archivos.
+
+## Guía integrada
+
+El botón **Guía sencilla** explica el uso sin salir del programa:
+
+- primeros pasos;
+- qué conviene hacer cada día;
+- revisión semanal;
+- revisión mensual;
+- privacidad.
+
+Puedes volver a abrir esa guía en cualquier momento.
+
+## Pregunta preparada para la IA
+
+El botón **Copiar pregunta para la IA** crea una pregunta completa y añade
+automáticamente el nombre de la carrera y la fecha final del intervalo
+seleccionado. La IA recibe instrucciones para:
+
+- revisar primero el periodo, la cobertura y los datos anómalos o ausentes;
+- comparar las últimas cuatro semanas completas con las cuatro anteriores
+  solo cuando existan periodos realmente comparables;
+- analizar volumen, constancia, tirada larga, intensidad, fuerza,
+  recuperación, sensaciones y semanas restantes hasta la carrera;
+- distinguir hechos, cálculos e interpretaciones;
+- terminar con un máximo de tres mejoras y tres prioridades prudentes.
+
+La respuesta solicitada es breve, sin tablas innecesarias y sin diagnósticos
+médicos. Si falta información decisiva, la IA puede formular hasta tres
+preguntas concretas.
+
+## Las tres formas de trabajar
+
+### Revisión recomendada
+
+Es el uso normal. Crea una fotografía actual de todo el periodo elegido e
+incluye semanas vacías o parciales, actividades, recuperación, sensaciones,
+equipamiento, contexto de carrera, calidad de los datos y comparaciones.
+
+Nombres habituales:
 
 ```text
-C:\Users\TU_USUARIO\.garminconnect
+revision_maraton_actual.txt
+revision_media_maraton_actual.txt
 ```
 
-No compartas nunca tu contraseña, código MFA, tokens ni la carpeta
-`.garminconnect`.
+Al repetir la revisión se sustituye ese archivo y se evita acumular copias.
 
-### 4. Abrir el programa
+### Analizar una actividad
 
-Cuando el instalador indique que ha terminado:
+Permite elegir una actividad reciente mediante una referencia privada. Incluye
+la máxima resolución temporal disponible, vueltas, zonas, pulso, ritmo o
+potencia, autoevaluación, equipamiento y datos del diario asociados.
 
-1. Cierra la ventana del instalador.
-2. Haz doble clic en `GarminLauncher.exe`.
-3. Elige las fechas **Descargar desde** y **Hasta**. Las dos están incluidas.
-4. Revisa el nombre propuesto para el archivo. Puedes cambiarlo.
-5. Deja desmarcado el detalle temporal salvo que quieras analizar sesiones
-   concretas con la máxima resolución registrada.
-6. Pulsa **Crear exportación**.
-7. No cierres la ventana hasta que aparezca **Exportación completada**.
+Garmin puede utilizar grabación inteligente: no se inventa un punto por segundo
+si el reloj no lo registró.
+El programa solicita hasta 100.000 muestras, suficiente para más de 27 horas
+a una muestra por segundo; Garmin decide la resolución que realmente entrega.
 
-## Uso habitual
+### Archivo histórico
 
-En las siguientes ocasiones solo tienes que:
+Permite elegir una fecha inicial y otra final, ambas incluidas. Es útil para
+archivar una temporada o estudiar un periodo diferente. Las series temporales
+de todas las actividades son opcionales porque aumentan mucho el tamaño.
 
-1. abrir `GarminLauncher.exe`;
-2. elegir el intervalo;
-3. revisar el nombre del archivo;
-4. pulsar **Crear exportación**.
-
-La aplicación reutiliza una caché local. Solo consulta lo que todavía no se ha
-descargado. Las actividades de los últimos 14 días se actualizan para recoger
-autoevaluaciones o cambios sincronizados después del entrenamiento. El nombre
-predeterminado describe el intervalo de forma clara para una persona y para una
-IA:
+Nombre habitual:
 
 ```text
-export\managed\garmin_datos_2026-01-01_a_2026-07-28.txt
+garmin_historico_2026-01-01_a_2026-07-29.txt
 ```
 
-Si vuelves a usar el mismo nombre, el archivo se sustituye. Así puedes mantener
-un único archivo actualizado. Si cambias el nombre, se conservarán ambos.
+## Qué aporta al análisis de una carrera
 
-Los botones **Abrir carpeta** y **Abrir archivo** permiten encontrar el
-resultado sin navegar manualmente por las carpetas.
+El esquema compacto actual es `3.1.0`. Entre otras cosas, prepara:
 
-## Qué datos incluye el archivo predeterminado
+- una línea temporal por semanas ISO, incluidas semanas sin entrenamiento;
+- totales del periodo y cobertura de cada métrica;
+- comparación de las últimas cuatro semanas completas con las cuatro
+  anteriores;
+- tendencias personales de 7 días frente a los 28 anteriores;
+- evolución de volumen, frecuencia, tirada larga, desnivel, carga y fuerza;
+- clasificación conservadora de sesiones, indicando la evidencia utilizada;
+- exposición al ritmo objetivo a partir de vueltas, si existe un tiempo
+  objetivo;
+- deriva cardiaca solo cuando la serie tiene duración, estabilidad y cobertura
+  suficientes;
+- presión arterial, composición corporal, hidratación y nutrición cuando hay
+  mediciones reales;
+- autoevaluación de Garmin y equipamiento asociado automáticamente, con su
+  nombre, fabricante y modelo;
+- preguntas preparadas para revisiones semanales, mensuales y por actividad;
+- calidad de datos, valores ausentes, transformaciones y límites del análisis.
 
-Según los datos disponibles en tu cuenta, el compacto semántico puede incluir:
+No aplica reglas mágicas de preparación, no convierte ausencias en cero y no
+predice lesiones. La IA debe distinguir hechos, cálculos e inferencias. No
+sustituye a un entrenador ni a un profesional sanitario.
 
-- edad al final del periodo, sexo, altura, sistema de unidades, zona horaria y
-  modelo del reloj principal, sin nombre ni identificadores;
-- pasos, pulso en reposo, sueño, estrés, batería corporal, SpO2, VFC y
-  respiración, resumidos en una fila por día;
-- mediciones reales de presión arterial, omitiendo respuestas vacías;
-- todas las actividades, vueltas, zonas de pulso y potencia, carga, ritmos,
-  autoevaluación de Garmin y zapatillas o bicicletas asociadas;
-- peso y composición corporal con unidades explícitas;
-- métricas de entrenamiento separadas entre datos del periodo, valores
-  anteriores, fotografías actuales y valores sin fecha;
-- récords personales y objetivos activos, sin insignias ni objetivos antiguos;
-- hidratación y nutrición únicamente cuando existe un registro real;
-- un resumen semanal calculado y un bloque de calidad de datos.
+## Mi carrera
 
-Para reducir ruido no se incluyen por defecto la biblioteca de entrenamientos,
-insignias, Golf, planes antiguos, tendencias de 52 semanas, salud femenina,
-catálogos de hábitos sin registrar, hábitos íntimos ni secciones vacías. Todo
-ello continúa disponible en el modo completo.
+En **Mi carrera** puedes indicar, de forma opcional:
 
-## Qué formato conviene para analizar una maratón con IA
+- distancia y fecha;
+- objetivo y tiempo deseado;
+- experiencia;
+- días y minutos disponibles;
+- día de tirada larga y fuerza;
+- terreno y clima esperado;
+- marca reciente;
+- limitaciones que deben respetarse.
 
-El formato predeterminado es el recomendado:
+Estos datos se guardan como información aportada por el usuario y se incluyen
+en el archivo para que la IA interprete correctamente el entrenamiento.
 
-- texto `.txt` con encabezados claros y bloques JSON normalizados;
-- nombres de campo estables con la unidad indicada, como `distance_m`,
-  `duration_s`, `heart_rate_bpm` o `weight_kg`;
-- una fila diaria sin repetir las respuestas de todos los endpoints;
-- actividades sin propietarios, coordenadas, polilíneas ni datos técnicos;
-- resúmenes, vueltas, zonas, potencia, carga, recuperación, sueño, VFC, peso,
-  presión arterial, autoevaluación y equipamiento;
-- metadatos con intervalo, zona horaria y versión del esquema;
-- avisos claros cuando Garmin no proporciona sueño, VFC u otros datos.
+## Mi diario
 
-El esquema compacto `2.1.1` también documenta las conversiones que aplica:
+El diario sirve para añadir únicamente lo que el reloj no conoce:
 
-- `sleepNeed.actual` llega en minutos y se guarda como `sleep_need_s`
-  multiplicándolo por 60;
-- los epochs de inicio y fin del sueño se interpretan explícitamente como
-  milisegundos UTC y se presentan en ISO 8601 con la zona configurada, por
-  ejemplo `2026-07-24T03:45:01+02:00`;
-- la temperatura meteorológica de una actividad llega en Fahrenheit y se
-  convierte a Celsius, mientras que la temperatura directa del sensor ya está
-  en Celsius;
-- la autoevaluación de esfuerzo de Garmin usa valores `10–100` y se presenta
-  como escala `1–10`; la sensación se traduce a categorías estables;
-- la distribución de pulso añade una zona 0 para el tiempo con pulso válido por
-  debajo de la zona 1 y separa los huecos en los que no existe pulso;
-- el valor de velocidad del umbral de lactato conserva el dato raw y documenta
-  la conversión usada por ese endpoint.
+- objetivo de una sesión;
+- esfuerzo percibido;
+- fatiga, motivación y estrés vital;
+- dolor y zona;
+- carbohidratos, líquido y sodio por hora;
+- tolerancia digestiva;
+- comentario opcional.
 
-Esto suele aportar más señal y menos ruido para revisar la preparación de una
-maratón. Permite que la IA relacione carga, sensaciones, recuperación y
-evolución sin recibir grandes catálogos, datos privados o estructuras
-duplicadas.
+El comentario permanece local por defecto. Solo entra en la exportación si
+marcas expresamente **Incluir comentario en el archivo para la IA**. Las
+entradas se pueden eliminar desde el propio diario.
 
-La casilla **Incluir el máximo detalle temporal de las actividades** añade la
-serie de métricas que Garmin conserva para cada sesión. En muchos dispositivos
-la grabación es aproximadamente segundo a segundo, pero Garmin puede utilizar
-grabación inteligente o intervalos variables: la aplicación no inventa puntos
-que el reloj no haya registrado. Los valores ausentes se conservan como
-`null`, de modo que cada muestra sigue alineada con sus descriptores.
+La autoevaluación de Garmin sigue siendo la fuente recomendada para esfuerzo y
+sensaciones de cada actividad. El diario la complementa, no la sustituye.
 
-Activa esa casilla para intervalos cortos o para estudiar entrenamientos
-importantes, por ejemplo una tirada larga, una prueba de ritmo de maratón o una
-sesión de series. Para varios meses, déjala desmarcada y utiliza vueltas,
-ritmos, zonas y resúmenes.
+## Rutina recomendada
+
+### Cada día
+
+- Sincroniza el reloj con Garmin Connect.
+- Después de una sesión importante, completa la autoevaluación de Garmin.
+- Usa el diario solo si quieres añadir contexto que el reloj no conoce.
+
+No hace falta crear un archivo todos los días.
+
+### Cada semana
+
+1. Abre **Revisión recomendada**.
+2. Crea el TXT nuevo.
+3. Sustituye el anterior en tu conversación o proyecto de IA.
+4. Utiliza la pregunta semanal preparada.
+5. Decide el entrenamiento con prudencia y teniendo en cuenta tus sensaciones.
+
+### Cada mes
+
+Usa el mismo archivo para pedir una revisión más estratégica:
+
+- evolución del bloque;
+- constancia y tirada larga;
+- equilibrio de intensidades y fuerza;
+- recuperación y calidad del registro;
+- prioridades hasta la carrera.
+
+## Texto o Excel
+
+### Texto con JSON `.txt` — recomendado para IA
+
+Es la opción predeterminada. Contiene texto plano con secciones y objetos
+JSON, conserva la jerarquía de los datos y se crea con menos trabajo que un
+libro de Excel. Es el formato recomendado para subir manualmente a ChatGPT,
+NotebookLM u otra IA.
+
+### Excel `.xlsx` — opcional
+
+Está pensado principalmente para quien quiera abrir los datos como tablas.
+También puede utilizarse con una IA, pero tarda más en generarse y no aporta
+una ventaja general frente al TXT con JSON.
+
+Contiene tablas estáticas fáciles de revisar:
+
+```text
+LEEME
+CONTEXTO_CARRERA
+RESUMEN
+SEMANAS
+DIAS
+ACTIVIDADES
+VUELTAS
+ZONAS
+ACTIVIDAD_EQUIPAMIENTO
+SERIES_DESCRIPTORES
+SERIES_ACTIVIDAD
+EQUIPAMIENTO
+DIARIO
+PRESION_ARTERIAL
+COMPOSICION
+METRICAS_GARMIN
+CALIDAD_DATOS
+DICCIONARIO
+```
+
+No utiliza macros. Los valores que podrían interpretarse como fórmulas se
+escapan antes de escribirlos.
+
+`SERIES_ACTIVIDAD` conserva las muestras detalladas cuando se activa esa
+opción para una actividad. `SERIES_DESCRIPTORES` explica el significado y la
+unidad de cada columna. El libro se escribe de forma progresiva para reducir
+el tiempo y la memoria utilizados. Si el intervalo contiene más de 25.000
+muestras, las series se omiten únicamente del Excel y queda una advertencia
+en `LEEME` y `CALIDAD_DATOS`; el TXT conserva todas las muestras. Para verlas
+en Excel, utiliza un intervalo más corto o analiza una actividad por separado.
+
+También se pueden crear ambos formatos, aunque esa opción tarda más.
+
+## Privacidad
+
+El modo compacto predeterminado intenta excluir:
+
+- nombre y datos identificativos del propietario;
+- identificadores reales de actividades, usuario, perfil, dispositivos y
+  equipamiento;
+- números de serie;
+- coordenadas, polilíneas y ubicaciones;
+- títulos y horas exactas de actividades;
+- URL, imágenes, cookies, tokens y credenciales;
+- hábitos íntimos y estructuras duplicadas.
+
+Los identificadores se sustituyen por referencias privadas estables para cada
+perfil, por ejemplo `activity_ref`. Así el diario y las tablas pueden
+relacionarse sin publicar el identificador real de Garmin.
+
+Antes de escribir el TXT o Excel se ejecuta una auditoría estructural de
+privacidad. Los fallos de Garmin se resumen sin copiar respuestas, URL o
+mensajes crudos. Si alguna sección falla, el archivo y la ventana indican
+**exportación parcial** para evitar conclusiones engañosas.
+
+El nombre visible y el modelo que hayas guardado en Garmin para unas
+zapatillas, bicicleta u otro equipo sí se incluyen deliberadamente. Esto
+permite distinguir, por ejemplo, unas zapatillas de entrenamiento de un modelo
+con placa de carbono. Sus identificadores reales siguen excluidos. Como el
+nombre puede ser texto escrito por ti, revísalo antes de compartir el archivo
+si contiene información personal. EntrenaIA no inventa si un modelo lleva
+placa: aporta el modelo para que el análisis pueda interpretarlo con prudencia.
+
+La caché sí conserva respuestas originales para no repetir descargas. Nunca
+subas la caché, la sesión o el diario a Git.
+
+> [!WARNING]
+> Los resultados se guardan dentro de **Documentos**. Si tu carpeta Documentos
+> está sincronizada con OneDrive u otro servicio, Windows también puede
+> sincronizar las exportaciones. Revisa esa configuración si quieres que
+> permanezcan solo en el PC.
+
+## Varias personas en el mismo PC
+
+El botón **Personas** crea perfiles separados. Cada perfil tiene su propia:
+
+- sesión de Garmin;
+- caché;
+- referencia privada;
+- carrera;
+- diario;
+- carpeta de resultados.
+
+Las exportaciones nunca intentan renovar una sesión con credenciales heredadas
+de `.env` o de otra persona. Si una sesión caduca, el programa pide iniciar
+sesión expresamente en ese perfil.
+
+Para una separación real frente a otras personas que usan el mismo ordenador,
+lo más seguro es crear una cuenta distinta de Windows para cada una.
 
 ## Dónde se guarda cada cosa
 
 | Contenido | Ubicación |
 |---|---|
-| Archivos que debes utilizar | `export\managed\garmin_datos_FECHA_a_FECHA.txt` |
-| Caché incremental | `export\managed\.cache\` |
-| Sesión de Garmin | `%USERPROFILE%\.garminconnect\` |
-| Preferencia de fecha del lanzador | `%LOCALAPPDATA%\GarminDataExportLauncher\settings.json` |
-| Entorno de Python | `.venv\` |
+| Archivos para la IA | `Documentos\Garmin para IA\NOMBRE_DEL_PERFIL\` |
+| Sesión, caché, carrera y diario | `%LOCALAPPDATA%\GarminDataExportLauncher\profiles\` |
+| Preferencias y lista de perfiles | `%LOCALAPPDATA%\GarminDataExportLauncher\` |
+| Sesión antigua compatible | `%USERPROFILE%\.garminconnect\` |
+| Entorno Python | `.venv\` dentro del proyecto |
 
-Los datos personales, la caché, los tokens y `.venv` están excluidos de Git.
+Todo ello queda fuera del repositorio o está cubierto por `.gitignore`.
 
-## Volver a instalar o reparar
+## Reparar o actualizar
 
-Puedes ejecutar `Instalar.bat` otra vez si:
+1. Cierra `GarminLauncher.exe`.
+2. Ejecuta otra vez `Instalar.bat`.
+3. Espera a que vuelva a compilar.
 
-- borraste accidentalmente `GarminLauncher.exe`;
-- se actualizó Windows;
-- la aplicación dejó de abrirse;
-- quieres volver a compilar la versión descargada.
-
-Antes de hacerlo, cierra `GarminLauncher.exe`.
-
-El instalador conserva la caché y las exportaciones existentes. No borra tus
-datos.
+El instalador no borra perfiles, caché, sesiones ni exportaciones.
+Si encuentra una `.venv` dañada o creada con otra versión de Python, la
+conserva con un nombre que empieza por `.venv.incompatible-` y crea un entorno
+nuevo con Python 3.11.
 
 ## Problemas frecuentes
 
-### La ventana se cierra demasiado rápido
+### Falta iniciar sesión
 
-Ejecuta `Instalar.bat`, no `Setup-Windows.ps1`. El archivo BAT mantiene la
-ventana abierta para que puedas leer el error.
+Pulsa **Iniciar sesión**, completa el acceso en la ventana negra y después
+pulsa **Comprobar**. Si la sesión caducó, repite el proceso en el perfil
+correcto.
 
-### Windows bloquea el ejecutable
+### Garmin limita las solicitudes
 
-El ejecutable es una compilación personal y no tiene una firma comercial.
-Comprueba que descargaste el proyecto desde
-`https://github.com/zarzawan/garmin-data-export` antes de utilizar
-**Más información → Ejecutar de todas formas**.
+Espera unos minutos y vuelve a ejecutar. La caché permite continuar sin repetir
+lo ya descargado.
 
-### Dice que no existe una sesión guardada
+### El archivo indica exportación parcial
 
-Vuelve a ejecutar `Instalar.bat` y acepta iniciar sesión. También puedes abrir
-PowerShell dentro de la carpeta y ejecutar:
+Abre **Detalles técnicos**. El archivo sigue siendo utilizable, pero una o más
+secciones no terminaron. Repite más tarde si esos datos son importantes.
 
-```powershell
-$env:PATH = "$PWD\.venv\Scripts;$env:PATH"
-dotnet run -- --login
-```
+### No aparecen sueño, VFC o presión arterial
 
-### Garmin rechaza el inicio de sesión
+El programa no inventa mediciones. Consulta `CALIDAD_DATOS` para distinguir
+entre ausencia real, falta de cobertura y error de descarga.
 
-- Comprueba el correo y la contraseña entrando primero en
-  `https://connect.garmin.com`.
-- Espera unos minutos si has realizado varios intentos.
-- Comprueba que el código MFA todavía no ha caducado.
+### No encuentro el archivo
 
-### La descarga se interrumpe
+Pulsa **Abrir carpeta**. Recuerda que Windows puede redirigir Documentos a
+OneDrive.
 
-Abre de nuevo el lanzador y pulsa **Crear exportación**. La caché permite
-continuar sin repetir todo el trabajo.
+## Uso técnico por línea de comandos
 
-## Uso avanzado
-
-No necesitas estos comandos para utilizar la ventana gráfica.
-
-Mostrar la ayuda:
+La aplicación gráfica .NET es la opción recomendada. Para consultar todas las
+opciones:
 
 ```powershell
-$env:PATH = "$PWD\.venv\Scripts;$env:PATH"
 dotnet run -- --help
 ```
 
-Exportar desde una fecha concreta:
+Iniciar sesión tradicional:
 
 ```powershell
-dotnet run -- --start-date 2025-01-01 --end-date 2025-03-31 --compact
+dotnet run -- --login
 ```
 
-Elegir el nombre e incluir la máxima resolución de las actividades:
+Revisión de 16 semanas en el TXT recomendado:
 
 ```powershell
-dotnet run -- --start-date 2025-01-01 --end-date 2025-03-31 --compact --activity-details --filename garmin_datos_2025-01-01_a_2025-03-31_detalle.txt
+dotnet run -- --report preparation --review-weeks 16 --format txt
 ```
 
-La salida compacta indica `activity_series_mode: none`; con
-`--activity-details` indica `activity_series_mode: full`. Ambas siguen siendo
-exportaciones compactas semánticas: la segunda añade principalmente las series
-temporales.
-
-Forzar una zona horaria IANA distinta de la detectada en Windows:
+Intervalo explícito compacto:
 
 ```powershell
-dotnet run -- --start-date 2025-01-01 --end-date 2025-03-31 --compact --timezone Europe/Madrid
+dotnet run -- --start-date 2026-01-01 --end-date 2026-07-29 --compact
 ```
 
-El programa calcula el desfase UTC según la fecha histórica seleccionada, incluyendo
-los cambios entre horario de invierno y verano.
-
-Exportar todo el historial:
+Historial completo original, sin transformar:
 
 ```powershell
-dotnet run -- --all --split
+dotnet run -- --all
 ```
 
-Crear un archivo completo con todas las respuestas originales de Garmin:
+El modo completo conserva respuestas originales y puede contener muchos más
+datos privados. No es el recomendado para subir a una IA.
 
-```powershell
-dotnet run -- --start-date 2025-01-01 --end-date 2025-03-31
-```
-
-Ejecutar las pruebas:
+## Desarrollo y comprobaciones
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
+dotnet restore GarminDataExport.slnx
+dotnet build GarminDataExport.slnx --no-restore
 ```
 
-Actualizar una exportación creada mediante la línea de comandos:
+Dependencias principales:
 
-```powershell
-dotnet run -- --update
-```
+- `garminconnect` y `garth` para Garmin Connect;
+- `tzdata` para zonas horarias IANA en Windows;
+- `openpyxl` para crear XLSX sin macros;
+- Python 3.11;
+- .NET 11.
 
-## Seguridad
+Garmin no ofrece una API personal oficial. Sus endpoints pueden cambiar y sus
+límites de llamadas no están documentados.
 
-Nunca añadas a Git ni compartas:
+## Licencia y atribución
 
-- `export\`;
-- `.env`;
-- `.garminconnect\`;
-- `.venv\`;
-- contraseñas, códigos MFA, cookies o tokens.
+Licencia Apache 2.0. Consulta [LICENSE](LICENSE).
 
-El archivo `.gitignore` bloquea estas rutas como medida adicional.
+Proyecto original:
+[sirredbeard/garmin-data-export](https://github.com/sirredbeard/garmin-data-export).
 
-## Idioma e identificadores técnicos
-
-La documentación, el instalador, la ventana y los mensajes destinados a
-personas están en español. Los argumentos de línea de comandos, nombres de
-métodos de Garmin y claves JSON como `sleep_start_local` o `distance_m`
-permanecen en inglés porque forman parte del formato técnico estable. Cambiarlos
-rompería exportaciones anteriores, pruebas y herramientas que ya los utilizan.
-
-El archivo `LICENSE` conserva el texto oficial en inglés de Apache 2.0 para no
-alterar su significado legal.
-
-## Colaborar
-
-Las mejoras y correcciones son bienvenidas mediante una incidencia o una
-solicitud de cambios en GitHub. Antes de adjuntar un ejemplo:
-
-- elimina nombres, correos e identificadores;
-- no incluyas nunca tokens, cookies, contraseñas ni códigos MFA;
-- utiliza fixtures inventadas o anonimizadas;
-- comprueba que `export\` no aparece en los archivos preparados para Git.
-
-## Proyecto original y licencia
-
-Esta edición está basada en
-[`sirredbeard/garmin-data-export`](https://github.com/sirredbeard/garmin-data-export).
-
-Se distribuye bajo la [licencia Apache 2.0](LICENSE). Garmin y Garmin Connect
-son marcas de sus respectivos propietarios.
+Esta edición se distribuye sin garantía. Revisa siempre los datos y protege tus
+archivos de salud.

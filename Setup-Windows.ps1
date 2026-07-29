@@ -38,6 +38,24 @@ function Find-Python311 {
     return $null
 }
 
+function Test-Python311Executable {
+    param([Parameter(Mandatory = $true)][string]$Executable)
+
+    if (-not (Test-Path -LiteralPath $Executable -PathType Leaf)) {
+        return $false
+    }
+    try {
+        $versionOutput = & $Executable -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>$null
+        return $LASTEXITCODE -eq 0 -and
+            [string]::Equals(
+                ([string]$versionOutput).Trim(),
+                '3.11',
+                [StringComparison]::Ordinal)
+    } catch {
+        return $false
+    }
+}
+
 function Find-DotNet {
     $dotnetCommand = Get-Command dotnet -ErrorAction SilentlyContinue
     if ($dotnetCommand) {
@@ -59,7 +77,7 @@ function Require-Winget {
 }
 
 Write-Host ''
-Write-Host 'Exportador de datos de Garmin - Instalación para Windows' -ForegroundColor Cyan
+Write-Host 'EntrenaIA - Exportador de Garmin para IA - Instalación' -ForegroundColor Cyan
 Write-Host '=========================================================' -ForegroundColor Cyan
 Write-Host ''
 Write-Host 'No cierres esta ventana. Se comprobarán todos los requisitos.' -ForegroundColor Gray
@@ -110,6 +128,20 @@ if (-not $hasDotNet11) {
     if ($LASTEXITCODE -eq 0) {
         $dotnetPackage = 'Microsoft.DotNet.SDK.11'
     } else {
+        # Microsoft publica la versión preliminar vigente bajo este ID
+        # genérico. La comprobación posterior impide aceptar otra versión.
+        winget show `
+            --id Microsoft.DotNet.SDK.Preview `
+            --exact `
+            --source winget `
+            --accept-source-agreements *> $null
+        if ($LASTEXITCODE -ne 0) {
+            throw (
+                'winget no ofrece todavía el SDK 11. Instálalo desde ' +
+                'https://dotnet.microsoft.com/download/dotnet/11.0 ' +
+                'y ejecuta de nuevo Instalar.bat.'
+            )
+        }
         $dotnetPackage = 'Microsoft.DotNet.SDK.Preview'
     }
 
@@ -128,15 +160,46 @@ if (-not $hasDotNet11) {
         throw '.NET se instaló, pero todavía no aparece en Windows. Reinicia el PC y ejecuta de nuevo Instalar.bat.'
     }
 }
+$installedSdks = & $dotnetExe --list-sdks
+if ($LASTEXITCODE -ne 0 -or -not [bool]($installedSdks -match '^11\.')) {
+    throw 'El SDK de .NET 11 todavía no está disponible. Reinicia el PC y ejecuta de nuevo Instalar.bat.'
+}
 Write-Host ".NET encontrado: $dotnetExe" -ForegroundColor Green
 
-$venvPython = Join-Path $projectRoot '.venv\Scripts\python.exe'
-if (-not (Test-Path -LiteralPath $venvPython)) {
+$venvRoot = Join-Path $projectRoot '.venv'
+$venvPython = Join-Path $venvRoot 'Scripts\python.exe'
+if ((Test-Path -LiteralPath $venvRoot) -and
+    -not (Test-Python311Executable -Executable $venvPython)) {
+    $projectPrefix = [IO.Path]::GetFullPath($projectRoot).TrimEnd(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    $resolvedVenv = [IO.Path]::GetFullPath($venvRoot)
+    $backupName = '.venv.incompatible-{0}-{1}' -f `
+        (Get-Date -Format 'yyyyMMdd-HHmmss'), `
+        ([Guid]::NewGuid().ToString('N').Substring(0, 6))
+    $venvBackup = Join-Path $projectRoot $backupName
+    $resolvedBackup = [IO.Path]::GetFullPath($venvBackup)
+    if (-not $resolvedVenv.StartsWith(
+            $projectPrefix,
+            [StringComparison]::OrdinalIgnoreCase) -or
+        -not $resolvedBackup.StartsWith(
+            $projectPrefix,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'No se puede reparar .venv porque su ruta no está dentro del proyecto.'
+    }
+    Move-Item -LiteralPath $resolvedVenv -Destination $resolvedBackup
+    Write-Host "El entorno anterior no era Python 3.11 y se ha conservado en: $resolvedBackup" -ForegroundColor Yellow
+}
+
+if (-not (Test-Python311Executable -Executable $venvPython)) {
     Write-Host 'Creando el entorno privado de Python...' -ForegroundColor Yellow
-    & $pythonExe -m venv (Join-Path $projectRoot '.venv')
+    & $pythonExe -m venv $venvRoot
     if ($LASTEXITCODE -ne 0) {
         throw "No se pudo crear el entorno de Python. Código de error: $LASTEXITCODE."
     }
+}
+if (-not (Test-Python311Executable -Executable $venvPython)) {
+    throw 'El entorno .venv no funciona con Python 3.11. Revisa el antivirus y ejecuta de nuevo Instalar.bat.'
 }
 
 Write-Host 'Instalando las dependencias comprobadas de Python...' -ForegroundColor Yellow
@@ -154,7 +217,9 @@ Write-Host 'Compilando la aplicación .NET...' -ForegroundColor Yellow
 if ($LASTEXITCODE -ne 0) {
     throw "No se pudieron restaurar las dependencias de .NET. Código de error: $LASTEXITCODE."
 }
-& $dotnetExe build (Join-Path $projectRoot 'GarminDataExport.slnx') --no-restore
+# La versión preliminar de .NET 11 puede terminar con código 1 y sin errores
+# al compilar esta solución en paralelo. La compilación secuencial es estable.
+& $dotnetExe build (Join-Path $projectRoot 'GarminDataExport.slnx') --no-restore -m:1
 if ($LASTEXITCODE -ne 0) {
     throw "La compilación de .NET ha fallado. Código de error: $LASTEXITCODE."
 }
@@ -181,42 +246,10 @@ Copy-Item -LiteralPath $publishedExe -Destination $rootExe -Force
 Write-Host ''
 Write-Host 'La instalación de la aplicación se ha completado correctamente.' -ForegroundColor Green
 Write-Host "Lanzador: $rootExe"
-
-$tokenDirectory = Join-Path $env:USERPROFILE '.garminconnect'
-$hasSavedSession = (Test-Path -LiteralPath $tokenDirectory) -and
-    [bool](Get-ChildItem -LiteralPath $tokenDirectory -File -ErrorAction SilentlyContinue)
-
-if (-not $hasSavedSession) {
-    Write-Host ''
-    Write-Host 'Este PC todavía no tiene una sesión guardada de Garmin.' -ForegroundColor Yellow
-    Write-Host 'Tus credenciales se enviarán directamente a Garmin y no se guardarán en el proyecto.'
-    Write-Host 'No compartas con nadie tu contraseña, código MFA ni tokens.'
-    Write-Host ''
-    $loginAnswer = Read-Host 'Pulsa Intro para iniciar sesión ahora o escribe N para hacerlo más tarde'
-    if ($loginAnswer -notmatch '^(?i:n|no)$') {
-        Write-Host ''
-        Write-Host 'Iniciando el acceso seguro a Garmin...' -ForegroundColor Yellow
-        $previousPath = $env:PATH
-        try {
-            $env:PATH = "$(Join-Path $projectRoot '.venv\Scripts');$env:PATH"
-            & $dotnetExe run `
-                --project (Join-Path $projectRoot 'GarminDataExport.csproj') `
-                -- `
-                --login
-            if ($LASTEXITCODE -ne 0) {
-                Write-Warning 'No se pudo completar el inicio de sesión. Puedes ejecutar Instalar.bat otra vez para reintentarlo.'
-            } else {
-                Write-Host 'La sesión de Garmin se ha guardado correctamente.' -ForegroundColor Green
-            }
-        } finally {
-            $env:PATH = $previousPath
-        }
-    } else {
-        Write-Host 'Inicio de sesión aplazado. Ejecuta Instalar.bat otra vez cuando quieras completarlo.' -ForegroundColor Yellow
-    }
-} else {
-    Write-Host 'Sesión de Garmin encontrada.' -ForegroundColor Green
-}
-
 Write-Host ''
-Write-Host 'Para utilizar el programa, haz doble clic en GarminLauncher.exe.' -ForegroundColor Cyan
+Write-Host 'Siguiente paso:' -ForegroundColor Cyan
+Write-Host '1. Cierra esta ventana.'
+Write-Host '2. Haz doble clic en GarminLauncher.exe.'
+Write-Host '3. Sigue el asistente Primeros pasos para elegir perfil e iniciar sesión.'
+Write-Host ''
+Write-Host 'Escribe tus credenciales y el MFA únicamente en la ventana de inicio de sesión.' -ForegroundColor Yellow

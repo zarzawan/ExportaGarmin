@@ -11,7 +11,9 @@
 
   <ItemGroup>
     <None Include="garmin_export.py" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="training_analysis.py" CopyToOutputDirectory="PreserveNewest" />
     <None Include="requirements.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="requirements-windows-lock.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
