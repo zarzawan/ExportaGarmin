@@ -15,14 +15,81 @@ from garmin_export import (
     _compact_hydration,
     _compact_lifestyle_entries,
     _compact_nutrition,
+    _compact_personal_records,
     _compact_profile,
     _compact_training,
+    _compact_gear_items,
+    _enrich_activity_gear_from_catalog,
     _find_blood_pressure_measurements,
+    _relative_manifest_paths,
+    _sanitize_compact,
     _weekly_summary,
 )
 
 
 class SemanticHelperTests(unittest.TestCase):
+    def test_generic_sanitizer_removes_short_location_and_link_aliases(self):
+        result = _sanitize_compact({
+            "lat": 39.1,
+            "lon": -0.3,
+            "lng": -0.3,
+            "link": "https://private.invalid",
+            "nested": {"lat": 40.0, "safe_name": "dato técnico"},
+            "plateau": 3,
+            "linked_metric": 4,
+        })
+
+        self.assertEqual({
+            "nested": {"safe_name": "dato técnico"},
+            "plateau": 3,
+            "linked_metric": 4,
+        }, result)
+
+    def test_active_goal_text_requires_explicit_free_text_consent(self):
+        raw = {
+            "active_goals": [{
+                "goalId": 987654321,
+                "goalName": "Objetivo de Persona Privada",
+                "description": "Comentario privado",
+                "targetValue": 100,
+                "goalType": {
+                    "name": "Distancia personalizada",
+                    "typeKey": "distance",
+                },
+            }],
+        }
+
+        strict = _compact_personal_records(raw)
+        opted_in = _compact_personal_records(raw, include_free_text=True)
+
+        strict_text = json.dumps(strict, ensure_ascii=False)
+        opted_in_text = json.dumps(opted_in, ensure_ascii=False)
+        self.assertNotIn("Objetivo de Persona Privada", strict_text)
+        self.assertNotIn("Comentario privado", strict_text)
+        self.assertNotIn("Distancia personalizada", strict_text)
+        self.assertEqual(
+            100,
+            strict["active_goals"][0]["targetValue"],
+        )
+        self.assertIn("Objetivo de Persona Privada", opted_in_text)
+        self.assertIn("Comentario privado", opted_in_text)
+
+    def test_manifest_paths_are_relative_and_cannot_escape_output(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "salida"
+            nested = root / "partes" / "informe.txt"
+            outside = Path(directory) / "fuera.txt"
+
+            self.assertEqual(
+                ["partes/informe.txt"],
+                _relative_manifest_paths([nested], root),
+            )
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "carpeta de salida",
+            ):
+                _relative_manifest_paths([outside], root)
+
     def test_profile_excludes_identity_and_exact_birth_date(self):
         raw = {
             "full_name": "Persona de prueba",
@@ -58,6 +125,21 @@ class SemanticHelperTests(unittest.TestCase):
         self.assertNotIn("Persona de prueba", text)
         self.assertNotIn("1980-05-20", text)
         self.assertNotIn("SECRETO", text)
+
+    def test_profile_never_uses_custom_device_display_name(self):
+        result = _compact_profile(
+            {
+                "user_profile": {"userData": {}},
+                "devices": [{
+                    "deviceId": 123456,
+                    "displayName": "Reloj de Persona Privada",
+                    "shortName": "Reloj privado",
+                }],
+            },
+            date(2026, 7, 29),
+        )
+
+        self.assertNotIn("primary_watch", result)
 
     def test_daily_record_normalises_sleep_and_hrv(self):
         raw = {
@@ -131,7 +213,9 @@ class SemanticHelperTests(unittest.TestCase):
             "gear": [
                 {
                     "uuid": "gear-1",
-                    "displayName": "Zapatillas de prueba",
+                    "displayName": "Zapatillas de competición",
+                    "gearMakeName": "ASICS",
+                    "gearModelName": "METASPEED SKY PARIS",
                     "gearTypeName": "running_shoes",
                 }
             ],
@@ -145,9 +229,76 @@ class SemanticHelperTests(unittest.TestCase):
             5,
             result["self_evaluation"]["perceived_exertion_1_10"],
         )
-        self.assertEqual("Zapatillas de prueba", result["gear"][0]["name"])
+        gear = result["gear"][0]
+        self.assertRegex(gear["gear_ref"], r"^gear_[0-9a-f]{12}$")
+        self.assertEqual("Zapatillas de competición", gear["gear_name"])
+        self.assertEqual("ASICS", gear["manufacturer"])
+        self.assertEqual("METASPEED SKY PARIS", gear["model"])
+        self.assertTrue(gear["gear_name_user_provided"])
+        self.assertFalse(gear["model_user_provided"])
+        self.assertNotIn("custom_name", gear)
+        self.assertNotIn("gear-1", text)
+        self.assertNotIn("Rodaje", text)
+        self.assertNotIn('"activity_id"', text)
         self.assertNotIn("latitude", text.lower())
         self.assertNotIn("No exportar", text)
+
+    def test_custom_model_replaces_generic_catalog_model(self):
+        result = _compact_gear_items([{
+            "gearPk": 123456789,
+            "uuid": "private-gear-uuid",
+            "userProfilePk": 987654321,
+            "gearMakeName": "Other",
+            "gearModelName": "Other",
+            "displayName": "Zapatillas rápidas",
+            "customMakeModel": "Nike Vaporfly 3",
+            "gearTypeName": "Shoes",
+        }])
+
+        self.assertEqual(1, len(result))
+        gear = result[0]
+        self.assertEqual("Zapatillas rápidas", gear["gear_name"])
+        self.assertNotIn("manufacturer", gear)
+        self.assertEqual("Nike Vaporfly 3", gear["model"])
+        self.assertTrue(gear["gear_name_user_provided"])
+        self.assertTrue(gear["model_user_provided"])
+        encoded = json.dumps(gear, ensure_ascii=False)
+        self.assertNotIn("123456789", encoded)
+        self.assertNotIn("987654321", encoded)
+        self.assertNotIn("private-gear-uuid", encoded)
+
+    def test_activity_gear_is_enriched_from_global_catalog(self):
+        activities = [{
+            "activity_ref": "activity_abcdef123456",
+            "gear": [{
+                "gear_ref": "gear_abcdef123456",
+                "type": "Shoes",
+            }],
+        }]
+        catalog = [{
+            "gear_ref": "gear_abcdef123456",
+            "gear_name": "Zapatillas de competición",
+            "manufacturer": "ASICS",
+            "model": "METASPEED SKY PARIS",
+            "gear_name_user_provided": True,
+            "model_user_provided": False,
+            "type": "Running Shoes",
+        }]
+
+        _enrich_activity_gear_from_catalog(activities, catalog)
+
+        association = activities[0]["gear"][0]
+        self.assertEqual(
+            "Zapatillas de competición",
+            association["gear_name"],
+        )
+        self.assertEqual("ASICS", association["manufacturer"])
+        self.assertEqual("METASPEED SKY PARIS", association["model"])
+        self.assertEqual(
+            "Shoes",
+            association["type"],
+            "El catálogo no debe sustituir un valor ya asociado.",
+        )
 
     def test_training_separates_future_snapshot(self):
         raw = {
@@ -182,6 +333,25 @@ class SemanticHelperTests(unittest.TestCase):
         )
         self.assertEqual("race_predictions", snapshots[0]["metric"])
 
+    def test_unknown_training_metric_drops_unapproved_free_text(self):
+        result, _ = _compact_training(
+            {
+                "training_status": {
+                    "calendarDate": "2026-01-10",
+                    "name": "Ruta privada junto a casa",
+                    "description": "Texto privado",
+                    "score": 72,
+                },
+            },
+            date(2026, 1, 1),
+            date(2026, 1, 31),
+        )
+
+        encoded = json.dumps(result, ensure_ascii=False)
+        self.assertNotIn("Ruta privada", encoded)
+        self.assertNotIn("Texto privado", encoded)
+        self.assertIn('"score": 72', encoded)
+
     def test_empty_blood_pressure_is_not_a_measurement(self):
         self.assertEqual(
             [],
@@ -212,11 +382,14 @@ class SemanticHelperTests(unittest.TestCase):
             "dailyLogsReport": [
                 {"name": "Illness", "logStatus": "YES"},
                 {"name": "Sexo en pareja", "logStatus": "YES"},
+                {"name": "Rapports sexuels", "logStatus": "YES"},
+                {"name": "Geschlechtsverkehr", "logStatus": "YES"},
+                {"name": "Relação sexual", "logStatus": "YES"},
                 {"name": "Unlogged catalogue entry"},
             ]
         })
 
-        self.assertEqual(["Illness"], [item["behaviour"] for item in result])
+        self.assertEqual(["illness"], [item["behaviour"] for item in result])
 
     def test_weekly_summary_uses_activities_once(self):
         result = _weekly_summary(
@@ -273,7 +446,12 @@ class SemanticExporterIntegrationTests(unittest.TestCase):
             }
         }
         api.get_activity_gear.return_value = [
-            {"uuid": "gear-1", "displayName": "Zapatillas"}
+            {
+                "uuid": "gear-1",
+                "displayName": "Zapatillas rápidas",
+                "gearMakeName": "Nike",
+                "gearModelName": "Vaporfly 3",
+            }
         ]
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -298,16 +476,26 @@ class SemanticExporterIntegrationTests(unittest.TestCase):
                 "perceived_exertion_1_10"
             ],
         )
-        self.assertEqual(
-            "Zapatillas",
-            exporter.compact_activities[0]["gear"][0]["name"],
+        gear = exporter.compact_activities[0]["gear"][0]
+        self.assertRegex(
+            gear["gear_ref"],
+            r"^gear_[0-9a-f]{12}$",
         )
+        self.assertEqual("Zapatillas rápidas", gear["gear_name"])
+        self.assertEqual("Nike", gear["manufacturer"])
+        self.assertEqual("Vaporfly 3", gear["model"])
+        self.assertNotIn("custom_name", gear)
 
     def test_global_gear_uses_profile_id_returned_by_current_library(self):
         api = Mock()
         api.get_user_profile.return_value = {"id": 123}
         api.get_gear.return_value = [
-            {"uuid": "gear-1", "displayName": "Bicicleta"}
+            {
+                "uuid": "gear-1",
+                "displayName": "Bicicleta de carretera",
+                "gearMakeName": "Canyon",
+                "gearModelName": "Ultimate CF SL",
+            }
         ]
         api.get_gear_defaults.return_value = []
         api.get_gear_stats.return_value = {"totalDistance": 50000}
@@ -323,7 +511,12 @@ class SemanticExporterIntegrationTests(unittest.TestCase):
         exporter.export_gear()
 
         api.get_gear.assert_called_once_with("123")
-        self.assertIn('"name": "Bicicleta"', "\n".join(exporter.md))
+        text = "\n".join(exporter.md)
+        self.assertIn('"gear_ref": "gear_', text)
+        self.assertIn('"gear_name": "Bicicleta de carretera"', text)
+        self.assertIn('"manufacturer": "Canyon"', text)
+        self.assertIn('"model": "Ultimate CF SL"', text)
+        self.assertNotIn('"uuid"', text)
 
     def test_full_profile_still_contains_raw_fields(self):
         garmin_export._compact_mode = False

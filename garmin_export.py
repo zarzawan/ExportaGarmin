@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Exportador de datos de Garmin Connect.
+EntrenaIA: exportador no oficial de Garmin Connect para IA.
 
 Descarga datos de salud, forma física y actividades mediante la biblioteca
 python-garminconnect y los guarda como texto con bloques JSON. El modo completo
@@ -27,7 +27,7 @@ import re
 import sys
 import threading
 import time
-import traceback
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from getpass import getpass
@@ -42,6 +42,22 @@ from garminconnect import (
     GarminConnectAuthenticationError,
     GarminConnectConnectionError,
     GarminConnectTooManyRequestsError,
+)
+
+from training_analysis import (
+    SCHEMA_VERSION,
+    activity_catalog_entry,
+    atomic_write_json,
+    atomic_write_text,
+    build_quality_report,
+    build_report_extensions,
+    load_local_json,
+    load_or_create_reference_secret,
+    normalise_journal,
+    normalise_race_context,
+    private_reference,
+    privacy_audit,
+    render_xlsx,
 )
 
 logging.basicConfig(
@@ -64,20 +80,41 @@ class RateLimiter:
         self.current_delay = base_delay
         self.call_count = 0
         self.last_call = 0.0
+        self.blocked_until = 0.0
         self.consecutive_ok = 0
         self._lock = threading.Lock()
 
     def wait(self):
-        with self._lock:
-            elapsed = time.time() - self.last_call
-            if elapsed < self.current_delay:
-                time.sleep(self.current_delay - elapsed)
-            self.last_call = time.time()
-            self.call_count += 1
-            # Pausa preventiva cada 250 llamadas.
-            if self.call_count % 250 == 0:
-                log.info(f"  Pausa de seguridad después de {self.call_count} llamadas a la API...")
-                time.sleep(2)
+        preventive_pause_pending = False
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                if preventive_pause_pending:
+                    wait_for = self.blocked_until - now
+                    if wait_for <= 0:
+                        self.last_call = now
+                        return
+                else:
+                    wait_for = max(
+                        self.blocked_until - now,
+                        self.current_delay - (now - self.last_call),
+                    )
+                if wait_for <= 0:
+                    self.last_call = now
+                    self.call_count += 1
+                    if self.call_count % 250 == 0:
+                        log.info(
+                            "  Pausa de seguridad después de "
+                            f"{self.call_count} llamadas a la API..."
+                        )
+                        self.blocked_until = max(
+                            self.blocked_until,
+                            now + 2,
+                        )
+                        preventive_pause_pending = True
+                    else:
+                        return
+            time.sleep(max(wait_for, 0.01))
 
     def on_success(self):
         with self._lock:
@@ -89,8 +126,14 @@ class RateLimiter:
         with self._lock:
             self.consecutive_ok = 0
             self.current_delay = min(self.current_delay * 2, 10.0)
-            log.warning(f"  Límite de Garmin alcanzado: nueva espera {self.current_delay:.1f}s; pausando 60s...")
-        time.sleep(60)
+            self.blocked_until = max(
+                self.blocked_until,
+                time.monotonic() + 60,
+            )
+            log.warning(
+                "  Límite de Garmin alcanzado: nueva espera "
+                f"{self.current_delay:.1f}s; pausando 60s todos los hilos..."
+            )
 
     def on_error(self):
         with self._lock:
@@ -99,10 +142,79 @@ class RateLimiter:
 
 
 _limiter = RateLimiter()
+_safe_call_failure_handler = None
+_safe_call_failure_handler_lock = threading.Lock()
+_safe_call_state = threading.local()
+
+
+def _set_safe_call_failure_handler(handler) -> None:
+    """Asocia temporalmente fallos saneados con la sección que se exporta."""
+    global _safe_call_failure_handler
+    with _safe_call_failure_handler_lock:
+        _safe_call_failure_handler = handler
+
+
+def _report_safe_call_failure(endpoint: str, exc: Exception) -> None:
+    _safe_call_state.failed = True
+    with _safe_call_failure_handler_lock:
+        handler = _safe_call_failure_handler
+    if handler is not None:
+        try:
+            handler(endpoint, _safe_exception_reason(exc))
+        except Exception:
+            log.debug(
+                "No se pudo registrar una incidencia de endpoint; "
+                "se ha omitido el detalle para proteger la salida."
+            )
+
+
+def _safe_call_with_status(fn, *args, label: str = "", **kwargs):
+    """Devuelve el valor y si la llamada terminó sin un fallo técnico."""
+    result = safe_call(fn, *args, label=label, **kwargs)
+    return result, not bool(getattr(_safe_call_state, "failed", False))
+
+
+def _exception_http_status(exc: Exception) -> Optional[int]:
+    """Obtiene un código HTTP sin serializar la excepción ni su URL."""
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    if status is None:
+        wrapped_error = getattr(exc, "error", None)
+        status = getattr(
+            getattr(wrapped_error, "response", None),
+            "status_code",
+            None,
+        )
+    if status is None and getattr(exc, "__cause__", None) is not None:
+        status = getattr(
+            getattr(exc.__cause__, "response", None),
+            "status_code",
+            None,
+        )
+    return status if isinstance(status, int) else None
+
+
+def _safe_exception_reason(exc: Exception) -> str:
+    """Describe un fallo sin incluir mensajes que puedan contener datos."""
+    class_name = re.sub(
+        r"[^A-Za-z0-9_.-]",
+        "",
+        type(exc).__name__,
+    )[:80] or "Error"
+    status = _exception_http_status(exc)
+    return f"{class_name} (HTTP {status})" if status is not None else class_name
+
+
+def _safe_endpoint_name(fn: Any) -> str:
+    """Devuelve únicamente el nombre técnico controlado del método llamado."""
+    name = getattr(fn, "__name__", "") or "endpoint"
+    return re.sub(r"[^A-Za-z0-9_]", "", str(name))[:80] or "endpoint"
 
 
 def safe_call(fn, *args, label: str = "", **kwargs) -> Optional[Any]:
     """Llama a Garmin con regulación adaptativa y control de errores."""
+    endpoint = _safe_endpoint_name(fn)
+    _safe_call_state.failed = False
     _limiter.wait()
     try:
         result = fn(*args, **kwargs)
@@ -116,23 +228,45 @@ def safe_call(fn, *args, label: str = "", **kwargs) -> Optional[Any]:
             _limiter.on_success()
             return result
         except Exception as e:
-            log.warning(f"  El reintento ha fallado ({label}): {e}")
+            log.warning(
+                f"  El reintento de {endpoint} ha fallado: "
+                f"{_safe_exception_reason(e)}"
+            )
             _limiter.on_error()
+            _report_safe_call_failure(endpoint, e)
             return None
     except GarthHTTPError as e:
-        status = getattr(getattr(e, "response", None), "status_code", None)
+        status = _exception_http_status(e)
         if status == 429:
             _limiter.on_rate_limit()
-            return None
+            _limiter.wait()
+            try:
+                result = fn(*args, **kwargs)
+                _limiter.on_success()
+                return result
+            except Exception as retry_error:
+                log.warning(
+                    f"  El reintento de {endpoint} ha fallado: "
+                    f"{_safe_exception_reason(retry_error)}"
+                )
+                _limiter.on_error()
+                _report_safe_call_failure(endpoint, retry_error)
+                return None
         if status in (400, 404):
-            log.debug(f"  No disponible ({status}) [{label}]")
+            log.debug(f"  {endpoint} no está disponible ({status})")
         else:
-            log.warning(f"  HTTP {status} [{label}]: {e}")
+            log.warning(
+                f"  Fallo de {endpoint}: {_safe_exception_reason(e)}"
+            )
             _limiter.on_error()
+            _report_safe_call_failure(endpoint, e)
         return None
     except Exception as e:
-        log.warning(f"  Error de la API [{label}]: {e}")
+        log.warning(
+            f"  Fallo de {endpoint}: {_safe_exception_reason(e)}"
+        )
         _limiter.on_error()
+        _report_safe_call_failure(endpoint, e)
         return None
 
 
@@ -140,17 +274,18 @@ def safe_call(fn, *args, label: str = "", **kwargs) -> Optional[Any]:
 # Autenticación
 # ---------------------------------------------------------------------------
 def _load_env_file():
-    """Carga credenciales desde .env mediante un lector sencillo clave=valor."""
-    for env_path in [Path(".env"), Path(__file__).parent / ".env"]:
-        if env_path.exists():
-            for line in env_path.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, _, val = line.partition("=")
-                    key, val = key.strip(), val.strip().strip("\"'")
-                    if key and val:
-                        os.environ.setdefault(key, val)
-            return True
+    """Carga solo variables Garmin desde el .env situado junto al script."""
+    env_path = Path(__file__).resolve().parent / ".env"
+    allowed = {"GARMIN_EMAIL", "GARMIN_PASSWORD"}
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, _, val = line.partition("=")
+                key, val = key.strip(), val.strip().strip("\"'")
+                if key in allowed and val:
+                    os.environ.setdefault(key, val)
+        return True
     return False
 
 
@@ -162,9 +297,7 @@ def _friendly_login_error(exc: Exception) -> str:
     """
     msg = str(exc)
     # GarthHTTPError envuelve HTTPError; recuperar su código de estado.
-    status = getattr(getattr(exc, "response", None), "status_code", None)
-    if status is None and hasattr(exc, "__cause__"):
-        status = getattr(getattr(exc.__cause__, "response", None), "status_code", None)
+    status = _exception_http_status(exc)
 
     # Comprobar también códigos mencionados dentro del mensaje.
     if status is None:
@@ -184,16 +317,16 @@ def _friendly_login_error(exc: Exception) -> str:
     if "connection" in msg.lower() or "timeout" in msg.lower():
         return "No se pudo contactar con Garmin. Comprueba la conexión a Internet."
 
-    # Alternativa: cortar antes de la primera URL para evitar un texto enorme.
-    if "https://" in msg:
-        msg = msg[:msg.index("https://")].rstrip(": ")
-    return msg or "Error de inicio de sesión desconocido."
+    return (
+        "Garmin no pudo completar el inicio de sesión "
+        f"({_safe_exception_reason(exc)})."
+    )
 
 
 def _print_login_error(exc: Exception, attempt: int, max_attempts: int):
     friendly = _friendly_login_error(exc)
     log.error(f"El inicio de sesión ha fallado: {friendly}")
-    log.debug(f"Error completo: {exc}")
+    log.debug(f"Tipo de fallo de acceso: {_safe_exception_reason(exc)}")
     if attempt < max_attempts:
         remaining = max_attempts - attempt
         suffix = "intento" if remaining == 1 else "intentos"
@@ -208,18 +341,28 @@ def _persist_auth_tokens(garmin: Garmin, tokenstore_path: Path):
     auth_client.dump(str(tokenstore_path))
 
 
-def authenticate(tokenstore: str) -> Garmin:
+def authenticate(
+    tokenstore: str,
+    *,
+    use_credential_environment: bool = True,
+    interactive: bool = True,
+    force_login: bool = False,
+) -> Garmin:
     """Autentica en Garmin Connect.
 
     Flujo:
       1. Probar tokens guardados, normalmente válidos alrededor de un año.
-      2. Cargar .env si existe (GARMIN_EMAIL / GARMIN_PASSWORD).
-      3. Preguntar de forma interactiva y guardar después los tokens.
+      2. Si está permitido, cargar .env o variables de credenciales.
+      3. Si está permitido, preguntar de forma interactiva y guardar tokens.
+
+    El lanzador gráfico desactiva el paso 2 para que un perfil nunca herede
+    credenciales de otra persona. Durante una exportación también desactiva el
+    paso 3: una sesión caducada debe renovarse expresamente desde el asistente.
     """
     tokenstore_path = Path(tokenstore).expanduser()
 
     # Paso 1: probar tokens guardados sin solicitar credenciales.
-    if tokenstore_path.exists():
+    if tokenstore_path.exists() and not force_login:
         try:
             garmin = Garmin()
             garmin.login(str(tokenstore_path))
@@ -229,14 +372,25 @@ def authenticate(tokenstore: str) -> Garmin:
                 GarminConnectConnectionError) as e:
             log.info(f"Los tokens guardados han caducado o no son válidos ({type(e).__name__}); hace falta iniciar sesión")
         except Exception as e:
-            log.info(f"No se pudieron cargar los tokens ({e}); hace falta iniciar sesión")
+            log.info(
+                "No se pudieron cargar los tokens "
+                f"({_safe_exception_reason(e)}); hace falta iniciar sesión"
+            )
 
-    # Paso 2: cargar .env si está disponible.
-    _load_env_file()
+    if not interactive:
+        raise RuntimeError(
+            "No hay una sesión válida para este perfil. "
+            "Abre el asistente y pulsa «Iniciar sesión»."
+        )
 
-    # Paso 3: obtener credenciales de variables, .env o la consola.
-    email = os.getenv("GARMIN_EMAIL") or os.getenv("EMAIL")
-    password = os.getenv("GARMIN_PASSWORD") or os.getenv("PASSWORD")
+    # Paso 2: cargar credenciales configuradas solo cuando se ha autorizado.
+    if use_credential_environment:
+        _load_env_file()
+        email = os.getenv("GARMIN_EMAIL")
+        password = os.getenv("GARMIN_PASSWORD")
+    else:
+        email = None
+        password = None
 
     if not email or not password:
         print()
@@ -277,7 +431,7 @@ def authenticate(tokenstore: str) -> Garmin:
             garmin = Garmin(email=email, password=password, is_cn=False, return_on_mfa=True)
         except GarminConnectConnectionError as e:
             log.error("Error de conexión: no se pudo contactar con Garmin. Comprueba Internet.")
-            log.debug(f"Detalles: {e}")
+            log.debug(f"Tipo de fallo: {_safe_exception_reason(e)}")
             sys.exit(1)
         except (GarthHTTPError, Exception) as e:
             _print_login_error(e, attempt, max_attempts)
@@ -295,7 +449,7 @@ def authenticate(tokenstore: str) -> Garmin:
     # Guardar tokens para las siguientes ejecuciones.
     tokenstore_path.mkdir(parents=True, exist_ok=True)
     _persist_auth_tokens(garmin, tokenstore_path)
-    log.info(f"Sesión iniciada: tokens guardados en {tokenstore_path}")
+    log.info("Sesión iniciada: tokens guardados en la carpeta de sesión elegida")
     log.info("   (Las próximas ejecuciones utilizarán los tokens automáticamente)")
     return garmin
 
@@ -310,8 +464,9 @@ _compact_mode = False
 _split_mode = False
 _update_mode = False
 _SPLIT_WORD_LIMIT = 480000  # Margen bajo el límite de 500.000 de NotebookLM.
-_COMPACT_SCHEMA_VERSION = "2.1.1"
+_COMPACT_SCHEMA_VERSION = SCHEMA_VERSION
 _RECENT_ACTIVITY_REFRESH_DAYS = 14
+_GEAR_REFRESH_DAYS = 7
 
 
 def _word_count(text: str) -> int:
@@ -611,11 +766,17 @@ def _as_list(value):
 
 _COMPACT_PRIVATE_KEYS = {
     "accesscontrolruledto",
+    "activityid",
     "activityuuid",
     "applicationkey",
     "deviceid",
     "displayname",
     "fullname",
+    "gearid",
+    "lat",
+    "link",
+    "lng",
+    "lon",
     "ownerdisplayname",
     "ownerfullname",
     "ownerid",
@@ -627,6 +788,8 @@ _COMPACT_PRIVATE_KEYS = {
     "recordeddevices",
     "registereddevices",
     "serialnumber",
+    "email",
+    "username",
     "unitid",
     "userid",
     "userpk",
@@ -641,18 +804,35 @@ _COMPACT_PRIVATE_KEYS = {
 }
 
 _COMPACT_PRIVATE_PARTS = (
+    "cookie",
     "latitude",
     "longitude",
+    "password",
     "polyline",
     "profileimage",
     "imageurl",
     "location",
     "photourl",
     "url",
+    "token",
 )
 
+_COMPACT_FREE_TEXT_KEYS = {
+    "activityname",
+    "comment",
+    "comments",
+    "description",
+    "displaylabel",
+    "goaldescription",
+    "goalname",
+    "label",
+    "name",
+    "note",
+    "notes",
+    "title",
+}
 
-def _sanitize_compact(data):
+def _sanitize_compact(data, remove_free_text=False):
     """Elimina identidad, dispositivos y ubicaciones del compacto."""
     if isinstance(data, dict):
         cleaned = {}
@@ -660,12 +840,22 @@ def _sanitize_compact(data):
             normal_key = re.sub(r"[^a-z0-9]", "", str(key).lower())
             if normal_key in _COMPACT_PRIVATE_KEYS:
                 continue
+            if normal_key.endswith("id") or normal_key.endswith("uuid"):
+                continue
             if any(part in normal_key for part in _COMPACT_PRIVATE_PARTS):
                 continue
-            cleaned[key] = _sanitize_compact(value)
+            if remove_free_text and normal_key in _COMPACT_FREE_TEXT_KEYS:
+                continue
+            cleaned[key] = _sanitize_compact(
+                value,
+                remove_free_text=remove_free_text,
+            )
         return cleaned
     if isinstance(data, list):
-        return [_sanitize_compact(item) for item in data]
+        return [
+            _sanitize_compact(item, remove_free_text=remove_free_text)
+            for item in data
+        ]
     return data
 
 
@@ -708,7 +898,11 @@ def _compact_profile(data, period_end, timezone_name=None):
         if selected is None and devices:
             selected = devices[0] if isinstance(devices[0], dict) else None
         if selected:
-            primary_watch = _pick(selected, "productDisplayName", "displayName", "shortName")
+            primary_watch = _pick(
+                selected,
+                "productDisplayName",
+                "productName",
+            )
 
     return _strip_empty({
         "sex": str(_pick(user_data, "gender") or "").lower() or None,
@@ -873,10 +1067,39 @@ def _compact_hrv(hrv_data):
     return _strip_empty(result)
 
 
-def _compact_lifestyle_entries(lifestyle):
-    """Conserva registros explícitos; los catálogos sin uso quedan vacíos."""
+def _compact_lifestyle_entries(lifestyle, include_free_text=False):
+    """Conserva solo categorías deportivas seguras y explícitamente registradas."""
     if not isinstance(lifestyle, dict):
         return []
+    safe_behaviours = {
+        "illness": "illness",
+        "sickness": "illness",
+        "enfermedad": "illness",
+        "maladie": "illness",
+        "krankheit": "illness",
+        "doenca": "illness",
+        "injury": "injury",
+        "lesion": "injury",
+        "blessure": "injury",
+        "verletzung": "injury",
+        "lesao": "injury",
+        "travel": "travel",
+        "viaje": "travel",
+        "voyage": "travel",
+        "reise": "travel",
+        "viagem": "travel",
+        "alcohol": "alcohol",
+        "alcool": "alcohol",
+        "caffeine": "caffeine",
+        "cafeina": "caffeine",
+        "cafeine": "caffeine",
+        "koffein": "caffeine",
+        "nap": "nap",
+        "siesta": "nap",
+        "sieste": "nap",
+        "nickerchen": "nap",
+        "soneca": "nap",
+    }
     result = []
     for item in _as_list(lifestyle.get("dailyLogsReport")):
         if not isinstance(item, dict):
@@ -887,16 +1110,27 @@ def _compact_lifestyle_entries(lifestyle):
         explicitly_logged = bool(status) or _number(amount) is not None or bool(note)
         if not explicitly_logged:
             continue
-        behaviour_name = str(item.get("name") or "")
-        private_terms = ("masturb", "sexo", "sexual", "sex with")
-        if any(term in behaviour_name.casefold() for term in private_terms):
+        behaviour_name = str(
+            _pick(item, "key", "typeKey", "name") or ""
+        )
+        normal_name = unicodedata.normalize(
+            "NFKD",
+            behaviour_name.casefold(),
+        )
+        normal_name = "".join(
+            character for character in normal_name
+            if not unicodedata.combining(character)
+        )
+        normal_name = re.sub(r"[^a-z0-9]+", " ", normal_name).strip()
+        safe_name = safe_behaviours.get(normal_name)
+        if safe_name is None:
             continue
         result.append(_strip_empty({
             "date": item.get("calendarDate"),
-            "behaviour": behaviour_name,
+            "behaviour": safe_name,
             "status": status,
             "amount": amount,
-            "note": note,
+            "note": note if include_free_text else None,
         }))
     return result
 
@@ -906,6 +1140,7 @@ def _compact_daily_record(
     data,
     timezone_name="Europe/Madrid",
     quality_callback=None,
+    include_free_text=False,
 ):
     """Crea un registro diario semántico sin series horarias raw."""
     if not isinstance(data, dict):
@@ -985,7 +1220,10 @@ def _compact_daily_record(
             quality_callback=quality_callback,
         ),
         "hrv": _compact_hrv(data.get("hrv")),
-        "lifestyle_logs": _compact_lifestyle_entries(data.get("lifestyle")),
+        "lifestyle_logs": _compact_lifestyle_entries(
+            data.get("lifestyle"),
+            include_free_text=include_free_text,
+        ),
     }
     return _strip_empty(record)
 
@@ -1039,7 +1277,7 @@ def _mark_partial_last_lap(laps):
     return laps
 
 
-def _normalise_laps(activity_data):
+def _normalise_laps(activity_data, include_exact_times=False):
     splits = activity_data.get("splits", {}) if isinstance(activity_data, dict) else {}
     lap_rows = splits.get("lapDTOs") if isinstance(splits, dict) else None
     source_name = "splits.lapDTOs"
@@ -1058,7 +1296,9 @@ def _normalise_laps(activity_data):
             "lap_index": _number(_pick(lap, "lapIndex", "messageIndex")) or index,
             "lap_type": _pick(lap, "type"),
             "step_type": _pick(lap, "intensityType"),
-            "start_time_local": _pick(lap, "startTimeLocal"),
+            "start_time_local": (
+                _pick(lap, "startTimeLocal") if include_exact_times else None
+            ),
             "distance_m": _number(_pick(lap, "distance")),
             "duration_s": _number(_pick(lap, "duration")),
             "elapsed_duration_s": _number(_pick(lap, "elapsedDuration")),
@@ -1083,7 +1323,6 @@ def _normalise_laps(activity_data):
 
 
 _ACTIVITY_SERIES_KEYS = {
-    "directTimestamp": "timestamp",
     "sumElapsedDuration": "elapsed_duration_raw",
     "sumDuration": "duration_raw",
     "sumDistance": "distance_raw",
@@ -1099,6 +1338,7 @@ _ACTIVITY_SERIES_KEYS = {
     "directEnhancedElevation": "elevation_raw",
     "directTemperature": "temperature_raw",
 }
+_MAX_ACTIVITY_CHART_POINTS = 100_000
 
 
 def _compact_activity_series(details, diagnostics=None):
@@ -1120,7 +1360,10 @@ def _compact_activity_series(details, diagnostics=None):
         if raw_key not in _ACTIVITY_SERIES_KEYS:
             continue
         index = descriptor.get("metricsIndex")
-        if not isinstance(index, int):
+        if not isinstance(index, int) or index < 0:
+            diagnostics.append(
+                "Se omitió un descriptor temporal con índice no válido."
+            )
             continue
         unit = descriptor.get("unit", {})
         selected.append(index)
@@ -1138,16 +1381,13 @@ def _compact_activity_series(details, diagnostics=None):
             diagnostics.append(
                 f"La muestra temporal {row_index} no contiene una matriz metrics válida."
             )
-            return None
-        sample = [
-            metrics[index] if index < len(metrics) else None
-            for index in selected
-        ]
-        if len(sample) != len(output_descriptors):
+            continue
+        if any(index >= len(metrics) for index in selected):
             diagnostics.append(
-                f"La muestra temporal {row_index} no coincide con sus descriptores."
+                f"La muestra temporal {row_index} está truncada y se omitió."
             )
-            return None
+            continue
+        sample = [metrics[index] for index in selected]
         samples.append(sample)
     if not output_descriptors or not samples:
         return None
@@ -1165,7 +1405,7 @@ def _compact_activity_series(details, diagnostics=None):
 
 
 def _activity_hr_distribution(details, zones, duration_s, average_hr):
-    """Añade zona 0 y separa intervalos sin pulso usando la serie temporal."""
+    """Separa pulso válido, zona 0, pulso no clasificado y falta de sensor."""
     result = [dict(zone) for zone in zones]
     classified_s = sum(
         _number(zone.get("duration_s")) or 0
@@ -1174,7 +1414,13 @@ def _activity_hr_distribution(details, zones, duration_s, average_hr):
     )
     active_s = 0.0
     valid_hr_s = 0.0
+    measured_below_zone_one_s = 0.0
     source = None
+    zone_one = next(
+        (zone for zone in result if _number(zone.get("zone")) == 1),
+        {},
+    )
+    zone_one_low = _number(zone_one.get("low_boundary_bpm"))
 
     descriptors = details.get("metricDescriptors") if isinstance(details, dict) else None
     rows = details.get("activityDetailMetrics") if isinstance(details, dict) else None
@@ -1212,6 +1458,8 @@ def _activity_hr_distribution(details, zones, duration_s, average_hr):
                     )
                     if heart_rate is not None and heart_rate > 0:
                         valid_hr_s += delta
+                        if zone_one_low is not None and heart_rate < zone_one_low:
+                            measured_below_zone_one_s += delta
             previous_duration = current_duration
         if active_s > 0:
             source = "activity_series"
@@ -1225,23 +1473,29 @@ def _activity_hr_distribution(details, zones, duration_s, average_hr):
         valid_hr_s = classified_s
         source = "garmin_zones_only"
 
-    if valid_hr_s > 0:
-        zone_zero_s = max(0.0, valid_hr_s - classified_s)
-        zone_one = next(
-            (zone for zone in result if _number(zone.get("zone")) == 1),
-            {},
-        )
+    remaining_valid_s = max(0.0, valid_hr_s - classified_s)
+    below_zone_one_s = (
+        min(measured_below_zone_one_s, remaining_valid_s)
+        if source == "activity_series" and zone_one_low is not None
+        else 0.0
+    )
+    valid_unclassified_s = max(
+        0.0,
+        valid_hr_s - classified_s - below_zone_one_s,
+    )
+
+    if valid_hr_s > 0 and source == "activity_series" and zone_one_low is not None:
         result.insert(0, _strip_empty({
             "zone": 0,
-            "duration_s": zone_zero_s,
+            "duration_s": below_zone_one_s,
             "label": "below_zone_1",
-            "upper_boundary_bpm": zone_one.get("low_boundary_bpm"),
+            "upper_boundary_bpm": zone_one_low,
         }))
-        denominator = sum(_number(zone.get("duration_s")) or 0 for zone in result)
-        if denominator:
-            for zone in result:
-                seconds = _number(zone.get("duration_s")) or 0
-                zone["percentage"] = seconds * 100.0 / denominator
+    denominator = sum(_number(zone.get("duration_s")) or 0 for zone in result)
+    if denominator:
+        for zone in result:
+            seconds = _number(zone.get("duration_s")) or 0
+            zone["percentage"] = seconds * 100.0 / denominator
 
     missing_s = max(0.0, active_s - valid_hr_s) if active_s > 0 else None
     paused_s = (
@@ -1249,30 +1503,78 @@ def _activity_hr_distribution(details, zones, duration_s, average_hr):
         if _number(duration_s) is not None and active_s > 0
         else None
     )
-    below_zone_one_s = max(0.0, valid_hr_s - classified_s)
     return result, _strip_empty({
         "heart_rate_duration_source": source,
         "active_duration_from_series_s": active_s if source == "activity_series" else None,
         "valid_heart_rate_duration_s": valid_hr_s if valid_hr_s > 0 else None,
         "missing_heart_rate_duration_s": missing_s,
-        "unclassified_heart_rate_duration_s": missing_s,
+        "valid_hr_unclassified_duration_s": (
+            valid_unclassified_s if valid_hr_s > 0 else None
+        ),
         "paused_duration_s": paused_s,
         "classified_zones_1_5_duration_s": classified_s if classified_s > 0 else None,
         "below_zone_1_duration_s": below_zone_one_s if valid_hr_s > 0 else None,
         "heart_rate_zone_coverage_pct": (
-            (classified_s + below_zone_one_s) * 100.0 / valid_hr_s
+            min(
+                100.0,
+                (classified_s + below_zone_one_s) * 100.0 / valid_hr_s,
+            )
             if valid_hr_s > 0
             else None
         ),
         "garmin_zones_1_5_coverage_pct": (
-            classified_s * 100.0 / valid_hr_s
+            min(100.0, classified_s * 100.0 / valid_hr_s)
             if valid_hr_s > 0
             else None
         ),
     })
 
 
-def _compact_gear_items(items, stats_by_id=None):
+_GENERIC_GEAR_TEXT = {
+    "desconocido",
+    "desconocida",
+    "ninguno",
+    "ninguna",
+    "none",
+    "not set",
+    "other",
+    "otra",
+    "otro",
+    "otros",
+    "unknown",
+}
+
+
+def _gear_text(item, *keys, omit_generic=False):
+    """Devuelve el primer texto útil de un campo de equipamiento."""
+    if not isinstance(item, dict):
+        return None
+    for key in keys:
+        value = item.get(key)
+        if not isinstance(value, str):
+            continue
+        value = " ".join(value.split())
+        if not value:
+            continue
+        normal = unicodedata.normalize("NFKD", value.casefold())
+        normal = "".join(
+            character
+            for character in normal
+            if not unicodedata.combining(character)
+        )
+        normal = re.sub(r"[^a-z0-9]+", " ", normal).strip()
+        if omit_generic and normal in _GENERIC_GEAR_TEXT:
+            continue
+        return value
+    return None
+
+
+def _compact_gear_items(
+    items,
+    stats_by_id=None,
+    reference_secret=None,
+    include_free_text=False,
+):
     stats_by_id = stats_by_id or {}
     result = []
     for item in _as_list(items):
@@ -1282,6 +1584,60 @@ def _compact_gear_items(items, stats_by_id=None):
         stats = stats_by_id.get(str(gear_id), {}) if gear_id is not None else {}
         if not isinstance(stats, dict):
             stats = {}
+        explicit_name = _gear_text(
+            item,
+            "displayName",
+            "gearName",
+            "name",
+            omit_generic=True,
+        )
+        manufacturer = _gear_text(
+            item,
+            "gearMakeName",
+            "manufacturer",
+            "brand",
+            "make",
+            omit_generic=True,
+        )
+        custom_model = _gear_text(
+            item,
+            "customMakeModel",
+            omit_generic=True,
+        )
+        catalog_model = _gear_text(
+            item,
+            "gearModelName",
+            "productName",
+            "makeModel",
+            "model",
+            omit_generic=True,
+        )
+        model = custom_model or catalog_model
+        gear_name = explicit_name
+        if gear_name is None:
+            gear_name = " ".join(
+                value
+                for value in (manufacturer, model)
+                if value
+            ) or None
+        gear_name_user_provided = (
+            True
+            if explicit_name is not None
+            else (custom_model is not None if gear_name is not None else None)
+        )
+        model_user_provided = (
+            custom_model is not None if model is not None else None
+        )
+        reference_material = gear_id
+        if reference_material is None:
+            reference_material = "|".join(
+                str(value or "")
+                for value in (
+                    model,
+                    _pick(item, "gearTypeName", "gearType", "type"),
+                    gear_name,
+                )
+            )
         total_distance = _pick(
             [item, stats],
             "totalDistance",
@@ -1289,15 +1645,16 @@ def _compact_gear_items(items, stats_by_id=None):
             "distance",
         )
         result.append(_strip_empty({
-            "gear_id": gear_id,
-            "name": _pick(
-                item,
-                "gearName",
-                "displayName",
-                "customMakeModel",
-                "productName",
-                "name",
+            "gear_ref": private_reference(
+                "gear",
+                reference_material,
+                reference_secret,
             ),
+            "gear_name": gear_name,
+            "manufacturer": manufacturer,
+            "model": model,
+            "gear_name_user_provided": gear_name_user_provided,
+            "model_user_provided": model_user_provided,
             "type": _pick(item, "gearTypeName", "gearType", "type"),
             "status": _pick(item, "gearStatusName", "status"),
             "total_distance_m": _number(total_distance),
@@ -1306,7 +1663,64 @@ def _compact_gear_items(items, stats_by_id=None):
     return [item for item in result if item]
 
 
-def _compact_activity(activity_data, include_series=False, quality_callback=None):
+def _enrich_activity_gear_from_catalog(activities, catalog):
+    """Completa asociaciones reducidas con la identidad del catálogo global."""
+    catalog_by_reference = {
+        item.get("gear_ref"): item
+        for item in _as_list(catalog)
+        if isinstance(item, dict) and item.get("gear_ref")
+    }
+    identity_fields = (
+        "gear_name",
+        "manufacturer",
+        "model",
+        "gear_name_user_provided",
+        "model_user_provided",
+        "type",
+    )
+    for activity in _as_list(activities):
+        if not isinstance(activity, dict):
+            continue
+        for association in _as_list(activity.get("gear")):
+            if not isinstance(association, dict):
+                continue
+            catalog_item = catalog_by_reference.get(
+                association.get("gear_ref")
+            )
+            if not catalog_item:
+                continue
+            for field in identity_fields:
+                if association.get(field) in (None, ""):
+                    value = catalog_item.get(field)
+                    if value not in (None, ""):
+                        association[field] = value
+    return activities
+
+
+def _activity_time_bucket(start_local):
+    """Conserva una franja útil sin publicar la hora exacta."""
+    if not isinstance(start_local, str):
+        return None
+    match = re.search(r"[T ](\d{2}):", start_local)
+    if not match:
+        return None
+    hour = int(match.group(1))
+    if 5 <= hour < 12:
+        return "morning"
+    if 12 <= hour < 18:
+        return "afternoon"
+    if 18 <= hour < 23:
+        return "evening"
+    return "night"
+
+
+def _compact_activity(
+    activity_data,
+    include_series=False,
+    quality_callback=None,
+    reference_secret=None,
+    include_free_text=False,
+):
     if not isinstance(activity_data, dict):
         return None
     summary = activity_data.get("summary", {})
@@ -1325,7 +1739,13 @@ def _compact_activity(activity_data, include_series=False, quality_callback=None
     speed = _pick(sources, "averageSpeed")
     max_speed = _pick(sources, "maxSpeed")
     start_local = _pick(sources, "startTimeLocal")
-    laps, lap_source = _normalise_laps(activity_data)
+    event_type = _pick(sources, "eventType", "eventTypeKey")
+    if isinstance(event_type, dict):
+        event_type = _pick(event_type, "typeKey", "key", "name")
+    laps, lap_source = _normalise_laps(
+        activity_data,
+        include_exact_times=include_free_text,
+    )
     duration_s = _number(_pick(sources, "duration"))
     average_hr = _number(_pick(sources, "averageHR"))
     hr_zones = _normalise_zones(
@@ -1362,11 +1782,17 @@ def _compact_activity(activity_data, include_series=False, quality_callback=None
             quality_callback("series_validation_errors", message)
 
     result = {
-        "activity_id": _pick(summary, "activityId"),
+        "activity_ref": private_reference(
+            "activity",
+            _pick(summary, "activityId"),
+            reference_secret,
+        ),
         "date": start_local[:10] if isinstance(start_local, str) else None,
-        "start_time_local": start_local,
+        "start_time_bucket": _activity_time_bucket(start_local),
+        "start_time_local": start_local if include_free_text else None,
         "sport": _pick(activity_type, "typeKey"),
-        "name": _pick(summary, "activityName"),
+        "garmin_event_type": event_type,
+        "name": _pick(summary, "activityName") if include_free_text else None,
         "distance_m": _number(_pick(sources, "distance")),
         "duration_s": duration_s,
         "elapsed_duration_s": _number(_pick(sources, "elapsedDuration")),
@@ -1430,7 +1856,11 @@ def _compact_activity(activity_data, include_series=False, quality_callback=None
         ),
         "laps": laps,
         "lap_source": lap_source if laps else None,
-        "gear": _compact_gear_items(activity_data.get("gear")),
+        "gear": _compact_gear_items(
+            activity_data.get("gear"),
+            reference_secret=reference_secret,
+            include_free_text=include_free_text,
+        ),
         "activity_series": activity_series,
     }
     return _strip_empty(result)
@@ -1658,7 +2088,9 @@ def _normalise_training_metric(name, value):
             "weekly_total_minutes": _number(value.get("weeklyTotal")),
             "weekly_goal_minutes": _number(value.get("weekGoal")),
         })
-    return _strip_empty(_sanitize_compact(value))
+    return _strip_empty(
+        _sanitize_compact(value, remove_free_text=True)
+    )
 
 
 def _compact_training(data, period_start, period_end):
@@ -1676,47 +2108,121 @@ def _compact_training(data, period_start, period_end):
     for name, value in (data or {}).items():
         if name.startswith("_title_") or value is None or value == [] or value == {}:
             continue
-        dates = _metric_dates(value)
-        normalised = _normalise_training_metric(name, value)
-        if normalised is None or normalised == {} or normalised == []:
-            continue
-        if any(metric_date > period_end for metric_date in dates):
-            result["current_snapshot"][name] = normalised
-            snapshots.append({
-                "metric": name,
-                "effective_dates": [
-                    metric_date.isoformat()
-                    for metric_date in dates
-                    if metric_date > period_end
-                ],
-            })
-        elif any(period_start <= metric_date <= period_end for metric_date in dates):
-            result["historical_period_data"][name] = normalised
-        elif dates and max(dates) < period_start:
-            result["latest_before_or_within_period"][name] = normalised
-        else:
-            result["undated"][name] = normalised
+
+        # Las listas se clasifican registro a registro. Así una sola medición
+        # posterior no arrastra por error todo el bloque histórico a snapshot.
+        raw_records = value if isinstance(value, list) else [value]
+        bucketed = {
+            "historical_period_data": [],
+            "latest_before_or_within_period": [],
+            "current_snapshot": [],
+            "undated": [],
+        }
+        dated_before = []
+        for raw_record in raw_records:
+            dates = _metric_dates(raw_record)
+            normalised = _normalise_training_metric(name, raw_record)
+            if normalised is None or normalised == {} or normalised == []:
+                continue
+            if dates and min(dates) > period_end:
+                bucketed["current_snapshot"].append(normalised)
+                snapshots.append({
+                    "metric": name,
+                    "effective_dates": [
+                        metric_date.isoformat()
+                        for metric_date in dates
+                        if metric_date > period_end
+                    ],
+                })
+            elif dates and any(metric_date > period_end for metric_date in dates):
+                # Un objeto indivisible que mezcla fechas se conserva como
+                # snapshot y queda documentado. Las listas ya se separaron.
+                bucketed["current_snapshot"].append(normalised)
+                snapshots.append({
+                    "metric": name,
+                    "effective_dates": [
+                        metric_date.isoformat()
+                        for metric_date in dates
+                        if metric_date > period_end
+                    ],
+                })
+            elif any(period_start <= metric_date <= period_end for metric_date in dates):
+                bucketed["historical_period_data"].append(normalised)
+            elif dates and max(dates) < period_start:
+                dated_before.append((max(dates), normalised))
+            else:
+                bucketed["undated"].append(normalised)
+
+        if dated_before:
+            dated_before.sort(key=lambda item: item[0])
+            bucketed["latest_before_or_within_period"].append(
+                dated_before[-1][1]
+            )
+
+        for bucket_name, records in bucketed.items():
+            if not records:
+                continue
+            result[bucket_name][name] = (
+                records if isinstance(value, list) else records[0]
+            )
     return _strip_empty(result), snapshots
 
 
-def _compact_personal_records(data):
+def _compact_personal_records(data, include_free_text=False):
     if not isinstance(data, dict):
         return None
     records = []
     for item in _as_list(data.get("personal_records")):
         if not isinstance(item, dict):
             continue
+        record_date = _pick(
+            item,
+            "activityStartDateTimeLocal",
+            "prStartTimeLocal",
+        )
         records.append(_strip_empty({
             "record_type": _pick(item, "prTypeLabelKey", "typeId"),
             "value": _number(item.get("value")),
-            "date": _pick(
-                item,
-                "activityStartDateTimeLocal",
-                "prStartTimeLocal",
+            "date": (
+                record_date[:10]
+                if isinstance(record_date, str)
+                else None
             ),
-            "activity_name": item.get("activityName"),
+            "activity_name": (
+                item.get("activityName") if include_free_text else None
+            ),
         }))
     active_goals = _sanitize_compact(data.get("active_goals") or [])
+    if not include_free_text:
+        private_goal_text_keys = {
+            "activityname",
+            "comment",
+            "comments",
+            "description",
+            "goaldescription",
+            "goalname",
+            "name",
+            "note",
+            "notes",
+            "title",
+        }
+
+        def remove_goal_text(value):
+            if isinstance(value, dict):
+                return {
+                    key: remove_goal_text(nested)
+                    for key, nested in value.items()
+                    if re.sub(
+                        r"[^a-z0-9]",
+                        "",
+                        str(key).lower(),
+                    ) not in private_goal_text_keys
+                }
+            if isinstance(value, list):
+                return [remove_goal_text(item) for item in value]
+            return value
+
+        active_goals = remove_goal_text(active_goals)
     return _strip_empty({
         "personal_records": records,
         "active_goals": active_goals,
@@ -1764,7 +2270,11 @@ def _compact_nutrition(data):
     })
 
 
-def _compact_gear_section(data):
+def _compact_gear_section(
+    data,
+    reference_secret=None,
+    include_free_text=False,
+):
     if not isinstance(data, dict):
         return []
     stats_by_id = {}
@@ -1774,7 +2284,12 @@ def _compact_gear_section(data):
         gear_id = _pick(detail, "_uuid", "uuid", "gearUUID")
         if gear_id is not None:
             stats_by_id[str(gear_id)] = detail.get("stats", {})
-    return _compact_gear_items(data.get("gear_list"), stats_by_id)
+    return _compact_gear_items(
+        data.get("gear_list"),
+        stats_by_id,
+        reference_secret=reference_secret,
+        include_free_text=include_free_text,
+    )
 
 
 def _average_present(items, path):
@@ -1827,6 +2342,7 @@ def _weekly_summary(activities, daily_records):
     zone_seconds = {}
     valid_heart_rate_seconds = 0.0
     missing_heart_rate_seconds = 0.0
+    valid_unclassified_heart_rate_seconds = 0.0
     for activity in activities:
         family = _sport_family(activity.get("sport"))
         duration = _number(activity.get("duration_s")) or 0
@@ -1867,6 +2383,9 @@ def _weekly_summary(activities, daily_records):
         )
         missing_heart_rate_seconds += (
             _number(quality.get("missing_heart_rate_duration_s")) or 0
+        )
+        valid_unclassified_heart_rate_seconds += (
+            _number(quality.get("valid_hr_unclassified_duration_s")) or 0
         )
 
     summary.update({
@@ -1909,7 +2428,9 @@ def _weekly_summary(activities, daily_records):
         "heart_rate_distribution_quality": {
             "valid_heart_rate_duration_s": valid_heart_rate_seconds,
             "missing_heart_rate_duration_s": missing_heart_rate_seconds,
-            "unclassified_heart_rate_duration_s": missing_heart_rate_seconds,
+            "valid_hr_unclassified_duration_s": (
+                valid_unclassified_heart_rate_seconds
+            ),
             "heart_rate_zone_coverage_pct": (
                 total_zone_seconds * 100.0 / valid_heart_rate_seconds
                 if valid_heart_rate_seconds
@@ -2055,6 +2576,51 @@ def _normalise_output_filename(filename: str) -> str:
     return name
 
 
+def _normalise_output_stem(filename: str) -> str:
+    """Valida un nombre base compartido por TXT y XLSX."""
+    name = filename.strip()
+    if not name:
+        raise ValueError("el nombre del archivo no puede estar vacío")
+    if name in {".", ".."} or "/" in name or "\\" in name:
+        raise ValueError("utiliza solo un nombre, sin carpetas")
+    if any(char in name for char in '<>:"|?*'):
+        raise ValueError("el nombre contiene caracteres no permitidos en Windows")
+    suffix = Path(name).suffix.casefold()
+    if suffix in {".txt", ".xlsx"}:
+        name = name[: -len(suffix)]
+    if not name or name.endswith((" ", ".")):
+        raise ValueError("el nombre no puede terminar en un espacio o un punto")
+    reserved = {
+        "CON", "PRN", "AUX", "NUL",
+        *(f"COM{i}" for i in range(1, 10)),
+        *(f"LPT{i}" for i in range(1, 10)),
+    }
+    if Path(name).name.upper() in reserved:
+        raise ValueError("ese nombre está reservado por Windows")
+    return name
+
+
+def _inclusive_review_start(end_date: date, review_weeks: int) -> date:
+    """Calcula un intervalo inclusivo de exactamente N semanas."""
+    return end_date - timedelta(days=review_weeks * 7 - 1)
+
+
+def _relative_manifest_paths(paths, output_directory):
+    """Devuelve rutas portables sin publicar la carpeta personal del equipo."""
+    output_root = Path(output_directory).resolve()
+    relative_paths = []
+    for path in paths:
+        resolved = Path(path).resolve()
+        try:
+            relative = resolved.relative_to(output_root)
+        except ValueError:
+            raise RuntimeError(
+                "El manifiesto solo puede incluir archivos de la carpeta de salida."
+            ) from None
+        relative_paths.append(relative.as_posix())
+    return relative_paths
+
+
 _WINDOWS_TIMEZONE_MAP = {
     "Romance Standard Time": "Europe/Madrid",
 }
@@ -2159,6 +2725,10 @@ def _chunked_date_call(fn, start: date, end: date, label: str, chunk_days: int =
 # ---------------------------------------------------------------------------
 # Caché para reanudar exportaciones interrumpidas sin repetir el trabajo.
 # ---------------------------------------------------------------------------
+_CACHE_ENVELOPE_KEY = "__garmin_export_cache__"
+_CACHE_FORMAT_VERSION = 2
+
+
 class ExportCache:
     """Caché JSON para respuestas diarias, actividades y secciones.
 
@@ -2166,9 +2736,18 @@ class ExportCache:
     claves. Los datos históricos permanecen entre ejecuciones.
     """
 
-    def __init__(self, out_dir: Path, enabled: bool = True):
+    def __init__(
+        self,
+        out_dir: Path,
+        enabled: bool = True,
+        cache_dir: Optional[Path] = None,
+    ):
         self.enabled = enabled
-        self.cache_dir = out_dir / ".cache"
+        self.cache_dir = (
+            Path(cache_dir)
+            if cache_dir is not None
+            else out_dir / ".cache"
+        )
         self.daily_dir = self.cache_dir / "daily"
         self.activity_dir = self.cache_dir / "activities"
         self.section_dir = self.cache_dir / "sections"
@@ -2209,66 +2788,143 @@ class ExportCache:
         if self.cache_dir.exists():
             shutil.rmtree(self.cache_dir, ignore_errors=True)
 
-    def get_day(self, ds: str) -> Optional[dict]:
+    def _read_entry(
+        self,
+        path: Path,
+        *,
+        accept_legacy: bool,
+    ) -> tuple[Optional[dict], set[str], bool]:
+        """Lee una entrada y separa sus datos de los metadatos de integridad."""
         if not self.enabled:
-            return None
-        path = self.daily_dir / f"{ds}.json"
+            return None, set(), False
         if path.exists():
             try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-                self.hits += 1
-                return data
-            except (json.JSONDecodeError, OSError):
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(raw, dict):
+                    raise ValueError("La entrada de caché no es un objeto.")
+                envelope = raw.get(_CACHE_ENVELOPE_KEY)
+                if isinstance(envelope, dict):
+                    payload = raw.get("data")
+                    if (
+                        envelope.get("version") != _CACHE_FORMAT_VERSION
+                        or not isinstance(payload, dict)
+                    ):
+                        self.misses += 1
+                        return None, set(), False
+                    complete_keys = {
+                        str(key)
+                        for key in envelope.get("complete_keys", [])
+                        if isinstance(key, str)
+                    }
+                    if envelope.get("complete") is False:
+                        self.misses += 1
+                        return None, complete_keys, False
+                    self.hits += 1
+                    return payload, complete_keys, True
+                if accept_legacy:
+                    # Los datos se conservan, pero ninguna clave se considera
+                    # verificada: la primera ejecución con v3 la actualizará.
+                    self.hits += 1
+                    return raw, set(), False
+            except (json.JSONDecodeError, OSError, ValueError):
                 pass
         self.misses += 1
-        return None
+        return None, set(), False
 
-    def put_day(self, ds: str, data: dict):
+    @staticmethod
+    def _write_entry(
+        path: Path,
+        data: dict,
+        *,
+        complete: bool,
+        complete_keys: Optional[set[str]] = None,
+    ) -> None:
+        """Escribe una entrada con una marca explícita de integridad."""
+        keys = complete_keys if complete_keys is not None else set(data)
+        envelope = {
+            _CACHE_ENVELOPE_KEY: {
+                "version": _CACHE_FORMAT_VERSION,
+                "complete": bool(complete),
+                "complete_keys": sorted(str(key) for key in keys),
+            },
+            "data": data,
+        }
+        path.write_text(
+            json.dumps(envelope, default=str, ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+    def get_day_entry(self, ds: str) -> tuple[Optional[dict], set[str]]:
+        """Devuelve los datos diarios y las claves confirmadas por Garmin."""
+        if not self.enabled:
+            return None, set()
+        path = self.daily_dir / f"{ds}.json"
+        data, complete_keys, _ = self._read_entry(
+            path,
+            accept_legacy=True,
+        )
+        return data, complete_keys
+
+    def get_day(self, ds: str) -> Optional[dict]:
+        """Compatibilidad: devuelve únicamente los datos de una entrada diaria."""
+        data, _ = self.get_day_entry(ds)
+        return data
+
+    def put_day(
+        self,
+        ds: str,
+        data: dict,
+        *,
+        complete_keys: Optional[set[str]] = None,
+    ):
         if not self.enabled:
             return
         path = self.daily_dir / f"{ds}.json"
-        path.write_text(json.dumps(data, default=str, ensure_ascii=False), encoding="utf-8")
+        keys = complete_keys if complete_keys is not None else set(data)
+        self._write_entry(
+            path,
+            data,
+            complete=True,
+            complete_keys=keys,
+        )
 
     def get_activity(self, activity_id) -> Optional[dict]:
         if not self.enabled:
             return None
         path = self.activity_dir / f"{activity_id}.json"
-        if path.exists():
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-                self.hits += 1
-                return data
-            except (json.JSONDecodeError, OSError):
-                pass
-        self.misses += 1
-        return None
+        data, _, _ = self._read_entry(path, accept_legacy=False)
+        return data
 
-    def put_activity(self, activity_id, data: dict):
+    def put_activity(self, activity_id, data: dict, *, complete: bool = True):
         if not self.enabled:
             return
         path = self.activity_dir / f"{activity_id}.json"
-        path.write_text(json.dumps(data, default=str, ensure_ascii=False), encoding="utf-8")
+        self._write_entry(path, data, complete=complete)
 
     def get_section(self, name: str) -> Optional[dict]:
         """Obtiene de caché una sección completa."""
         if not self.enabled:
             return None
         path = self.section_dir / f"{name}.json"
-        if path.exists():
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-                self.hits += 1
-                return data
-            except (json.JSONDecodeError, OSError):
-                pass
-        self.misses += 1
-        return None
+        data, _, _ = self._read_entry(path, accept_legacy=False)
+        return data
 
-    def put_section(self, name: str, data: dict):
+    def section_needs_refresh(self, name: str, max_age_days: int) -> bool:
+        """Indica si una sección no existe o ha superado su vigencia."""
+        if not self.enabled:
+            return True
+        path = self.section_dir / f"{name}.json"
+        try:
+            age_seconds = max(0.0, time.time() - path.stat().st_mtime)
+        except OSError:
+            return True
+        return age_seconds >= timedelta(days=max_age_days).total_seconds()
+
+    def put_section(self, name: str, data: dict, *, complete: bool = True):
         if not self.enabled:
             return
         path = self.section_dir / f"{name}.json"
-        path.write_text(json.dumps(data, default=str, ensure_ascii=False), encoding="utf-8")
+        self._write_entry(path, data, complete=complete)
 
     def summary(self) -> str:
         total = self.hits + self.misses
@@ -2289,7 +2945,16 @@ class GarminExporter:
                  explicit_end_date: Optional[date] = None,
                  output_filename: Optional[str] = None,
                  include_activity_details: bool = False,
-                 timezone_name: Optional[str] = None):
+                 timezone_name: Optional[str] = None,
+                 output_format: str = "txt",
+                 report_type: str = "history",
+                 race_context: Optional[dict] = None,
+                 journal: Optional[list] = None,
+                 review_weeks: Optional[int] = None,
+                  selected_activity_ref: Optional[str] = None,
+                  include_free_text: bool = False,
+                  manifest_path: Optional[Path] = None,
+                  run_id: Optional[str] = None):
         self.api = api
         self.out = out_dir
         self.max_activities = max_activities
@@ -2298,12 +2963,34 @@ class GarminExporter:
         self.explicit_start_date = explicit_start_date
         self.explicit_end_date = explicit_end_date
         self.output_filename = output_filename
-        self.include_activity_details = include_activity_details
+        self.output_format = output_format
+        self.report_type = report_type
+        self.race_context = race_context
+        self.journal = journal or []
+        self.review_weeks = review_weeks
+        self.selected_activity_ref = selected_activity_ref
+        self.include_free_text = include_free_text
+        self.manifest_path = Path(manifest_path) if manifest_path else None
+        self.run_id = run_id
+        self.include_activity_details = (
+            include_activity_details or report_type == "activity"
+        )
         self.timezone_name = _resolve_timezone(timezone_name)
         self.cache = cache or ExportCache(out_dir, enabled=False)
+        self.reference_secret = load_or_create_reference_secret(
+            self.cache.cache_dir
+        )
         self.today = explicit_end_date or date.today()
         self.errors: list[str] = []
+        self.endpoint_failures: set[tuple[str, str, str]] = set()
+        self._endpoint_failure_events = 0
+        self._endpoint_failures_lock = threading.Lock()
         self.md: list[str] = []
+        self.semantic_model: dict[str, Any] = {}
+        self.written_files: list[Path] = []
+        self.sensitive_identifiers: set[str] = set()
+        self.sensitive_private_values: set[str] = set()
+        self.sensitive_activity_names: set[str] = set()
         self.update_base_date: Optional[str] = None  # end date of base export
         self.compact_daily_records = []
         self.compact_activities = []
@@ -2321,6 +3008,9 @@ class GarminExporter:
                 "Se excluyeron coordenadas, polilíneas y ubicaciones.",
                 "Se excluyeron números de serie e identificadores de dispositivos.",
                 "Se excluyeron hábitos íntimos del registro de estilo de vida.",
+                "Los identificadores de actividades y equipamiento se sustituyeron por referencias locales.",
+                "Los títulos y horas exactas de actividades se omitieron salvo consentimiento explícito.",
+                "Los nombres y modelos de equipamiento se conservan para interpretar las actividades; el texto personalizado se marca como user_provided.",
             ],
             "duplicate_sources_removed": [],
         }
@@ -2335,18 +3025,16 @@ class GarminExporter:
                          f"descargando desde {self.start_date}")
             else:
                 log.warning("No se encontró una exportación anterior; se utilizará --days")
-                self.start_date = self.today - timedelta(days=days)
+                self.start_date = self.today - timedelta(days=max(days - 1, 0))
         elif explicit_start_date is not None:
             self.start_date = explicit_start_date
         elif fetch_all:
             self.start_date = self._detect_start_date()
         else:
-            self.start_date = self.today - timedelta(days=days)
+            self.start_date = self.today - timedelta(days=max(days - 1, 0))
         if self.start_date > self.today:
             raise ValueError("la fecha inicial no puede ser posterior a la fecha final")
-        self.days = (self.today - self.start_date).days
-        if explicit_start_date is not None:
-            self.days += 1  # Un intervalo explícito incluye la fecha inicial.
+        self.days = (self.today - self.start_date).days + 1
 
     def _range_cache_key(self, section_name: str) -> str:
         """Separa las cachés dependientes de fechas por intervalo inclusivo."""
@@ -2357,55 +3045,480 @@ class GarminExporter:
         if message not in values:
             values.append(message)
 
+    def _record_endpoint_failure(
+        self,
+        section: str,
+        endpoint: str,
+        reason: str,
+    ) -> None:
+        """Conserva solo nombres técnicos controlados, nunca mensajes crudos."""
+        safe_section = re.sub(
+            r"[^A-Za-z0-9 &_-]",
+            "",
+            str(section),
+        )[:80] or "Section"
+        safe_endpoint = re.sub(
+            r"[^A-Za-z0-9_]",
+            "",
+            str(endpoint),
+        )[:80] or "endpoint"
+        safe_reason = re.sub(
+            r"[^A-Za-z0-9_. ()-]",
+            "",
+            str(reason),
+        )[:100] or "Error"
+        with self._endpoint_failures_lock:
+            self._endpoint_failure_events += 1
+            self.endpoint_failures.add(
+                (safe_section, safe_endpoint, safe_reason)
+            )
+
+    def _partial_sections(self) -> list[str]:
+        sections = {
+            error.split(":", 1)[0]
+            for error in self.errors
+        }
+        with self._endpoint_failures_lock:
+            sections.update(
+                section
+                for section, _, _ in self.endpoint_failures
+            )
+        return sorted(sections)
+
+    def _endpoint_failure_count(self) -> int:
+        """Cuenta cada llamada fallida para decidir si una caché es reutilizable."""
+        with self._endpoint_failures_lock:
+            return self._endpoint_failure_events
+
+    def _is_partial(self) -> bool:
+        with self._endpoint_failures_lock:
+            return bool(self.errors or self.endpoint_failures)
+
+    def _remember_sensitive_payload(self, payload):
+        """Recuerda valores privados observados para comprobar la salida final."""
+        sensitive_keys = {
+            "fullname",
+            "firstname",
+            "lastname",
+            "ownerfullname",
+            "ownerdisplayname",
+            "publicdisplayname",
+            "username",
+            "email",
+            "birthdate",
+            "dateofbirth",
+            "serialnumber",
+            "address",
+            "streetaddress",
+            "postalcode",
+            "postcode",
+            "city",
+            "startcity",
+            "endcity",
+            "location",
+            "latitude",
+            "longitude",
+            "profileimage",
+            "photourl",
+            "imageurl",
+            "url",
+        }
+
+        def visit(value, parents=()):
+            if isinstance(value, dict):
+                for key, nested in value.items():
+                    normal = re.sub(r"[^a-z0-9]", "", str(key).lower())
+                    is_identifier = (
+                        normal.endswith("uuid")
+                        or (
+                            normal.endswith("id")
+                            and normal not in {"fluid", "solid", "valid"}
+                        )
+                        or normal in {
+                            "profilepk",
+                            "userpk",
+                            "userprofilepk",
+                            "userprofilenumber",
+                        }
+                    )
+                    is_user_display_name = (
+                        normal == "displayname"
+                        and any(
+                            parent in {"userdata", "userprofile", "profile"}
+                            for parent in parents
+                        )
+                    )
+                    if (
+                        (is_identifier or normal in sensitive_keys or is_user_display_name)
+                        and not isinstance(nested, (dict, list, bool))
+                        and nested is not None
+                    ):
+                        candidate = str(nested).strip()
+                        if len(candidate) >= 4:
+                            self.sensitive_private_values.add(candidate)
+                    visit(nested, (*parents, normal))
+            elif isinstance(value, list):
+                for nested in value:
+                    visit(nested, parents)
+
+        visit(payload)
+
+    def _remember_compact(self, key: str, value):
+        """Guarda el objeto que compartirán los renderizadores TXT y XLSX."""
+        if _compact_mode:
+            self.semantic_model[key] = value
+
+    def _finalize_semantic_model(self):
+        """Añade los cálculos v3 y ejecuta el control final de privacidad."""
+        if not _compact_mode:
+            return
+        extensions = build_report_extensions(
+            self.compact_activities,
+            self.compact_daily_records,
+            self.start_date,
+            self.today,
+            race_context=self.race_context,
+            journal=self.journal,
+        )
+        self.compact_activities = extensions["activities"]
+        self.semantic_model["activities"] = self.compact_activities
+        self.semantic_model["period_summary"] = extensions["period_summary"]
+        self.semantic_model["weekly_timeline"] = extensions["weekly_timeline"]
+        self.semantic_model["race_analysis"] = extensions["race_analysis"]
+        self.semantic_model["suggested_prompts"] = extensions["prompts"]
+        if self.race_context:
+            self.semantic_model["race_context"] = self.race_context
+        if self.journal:
+            self.semantic_model["journal"] = self.journal
+
+        with self._endpoint_failures_lock:
+            endpoint_failures = sorted(self.endpoint_failures)
+        for error in self.errors:
+            section = error.split(":", 1)[0]
+            self._quality_add(
+                "endpoint_errors",
+                f"La sección {section} no terminó correctamente.",
+            )
+        for section, endpoint, reason in endpoint_failures:
+            self._quality_add(
+                "endpoint_errors",
+                (
+                    f"La consulta {endpoint} de la sección {section} "
+                    f"no terminó correctamente ({reason})."
+                ),
+            )
+
+        quality = build_quality_report(
+            self.compact_daily_records,
+            self.compact_activities,
+            self.start_date,
+            self.today,
+            legacy_quality=self.data_quality,
+        )
+        exported_gear = list(_as_list(self.semantic_model.get("gear")))
+        for activity in self.compact_activities:
+            if isinstance(activity, dict):
+                exported_gear.extend(_as_list(activity.get("gear")))
+        privacy = quality.setdefault("privacy", {})
+        privacy["gear_names_exported"] = any(
+            isinstance(item, dict) and bool(item.get("gear_name"))
+            for item in exported_gear
+        )
+        privacy["gear_user_provided_text_exported"] = any(
+            isinstance(item, dict)
+            and (
+                item.get("gear_name_user_provided") is True
+                or item.get("model_user_provided") is True
+            )
+            for item in exported_gear
+        )
+        metadata = self.semantic_model.setdefault("export_metadata", {})
+        is_partial = self._is_partial()
+        metadata["export_status"] = "partial" if is_partial else "completed"
+        if is_partial:
+            failed_sections = self._partial_sections()
+            metadata["failed_sections"] = failed_sections
+            quality["export_errors"] = [
+                {
+                    "section": section,
+                    "message": "La sección no terminó correctamente.",
+                }
+                for section in failed_sections
+            ]
+        if self.errors:
+            fatal_sections = sorted({
+                error.split(":", 1)[0]
+                for error in self.errors
+            })
+            quality.setdefault("issues", []).extend(
+                {
+                    "code": "EXPORT_SECTION_ERROR",
+                    "severity": "error",
+                    "scope": section,
+                    "message": "La sección no terminó correctamente.",
+                }
+                for section in fatal_sections
+            )
+        audit_model = {
+            key: value
+            for key, value in self.semantic_model.items()
+            if key != "data_quality"
+        }
+        if self.errors:
+            audit_model["export_errors"] = self.errors
+        identifier_values = [
+            value
+            for value in self.sensitive_identifiers
+            if len(value.strip()) >= 6
+        ]
+        private_values = [
+            value
+            for value in self.sensitive_private_values
+            if len(value.strip()) >= 4
+        ]
+        audit = privacy_audit(
+            audit_model,
+            forbidden_values=private_values,
+            forbidden_identifiers=identifier_values,
+        )
+        if not self.include_free_text:
+            title_values = [
+                value
+                for value in self.sensitive_activity_names
+                if len(value.strip()) >= 12
+            ]
+            title_audit = privacy_audit(
+                {"activities": self.compact_activities},
+                forbidden_values=title_values,
+            )
+            audit["passed"] = audit["passed"] and title_audit["passed"]
+            audit["forbidden_key_paths"] = sorted(set(
+                audit["forbidden_key_paths"]
+                + title_audit["forbidden_key_paths"]
+            ))
+            audit["forbidden_values_detected"] = sorted(set(
+                audit["forbidden_values_detected"]
+                + title_audit["forbidden_values_detected"]
+            ))
+        quality["privacy_audit"] = audit
+        if not audit.get("passed"):
+            raise RuntimeError(
+                "La comprobación de privacidad detectó campos no permitidos; "
+                "no se ha escrito ningún archivo."
+            )
+        self.semantic_model["data_quality"] = quality
+
+    def _render_compact_text(self) -> str:
+        """Renderiza el modelo semántico v3 como texto plano indexable."""
+        exported_at = (
+            (self.semantic_model.get("export_metadata") or {}).get("exported_at")
+            or datetime.now().isoformat()
+        )
+        lines = [
+            "Exportación privada de entrenamiento de Garmin Connect",
+            f"Exportado: {exported_at}",
+            (
+                f"Intervalo de fechas: {self.start_date} a {self.today} "
+                f"({self.days} días)"
+            ),
+            (
+                f"Formato: compacto semántico v{_COMPACT_SCHEMA_VERSION}; "
+                "texto plano con objetos JSON."
+            ),
+            (
+                "Finalidad: revisar una preparación deportiva con una IA. "
+                "Nada se sube automáticamente."
+            ),
+            "",
+            "Índice de contenidos",
+        ]
+        section_info = [
+            ("Export Metadata", "export_metadata", "Versión, intervalo, zona horaria y privacidad."),
+            ("Race Context", "race_context", "Carrera, objetivo y disponibilidad aportados por la persona."),
+            ("Profile", "profile", "Contexto deportivo reducido sin identidad."),
+            ("Period Summary", "period_summary", "Totales de todo el intervalo solicitado."),
+            ("Weekly Timeline", "weekly_timeline", "Una fila por semana ISO, incluidas semanas vacías o parciales."),
+            ("Daily Health", "daily_health", "Salud y recuperación por día."),
+            ("Activities", "activities", "Actividades privadas, clasificación, vueltas, zonas y equipamiento."),
+            ("Blood Pressure", "blood_pressure", "Mediciones reales de presión arterial."),
+            ("Body Composition", "body_composition", "Peso y composición corporal con unidades."),
+            ("Training Metrics", "training_metrics", "Métricas de Garmin separadas por relación temporal."),
+            ("Goals and Records", "goals_and_records", "Récords y objetivos activos sin títulos privados."),
+            ("Gear", "gear", "Equipamiento con referencias locales."),
+            ("Hydration", "hydration", "Días con hidratación real registrada."),
+            ("Nutrition", "nutrition", "Días con nutrición real registrada."),
+            ("Journal", "journal", "Anotaciones opcionales aportadas por la persona."),
+            ("Race Analysis", "race_analysis", "Comparaciones y métricas derivadas auditables."),
+            ("Suggested Prompts", "suggested_prompts", "Instrucciones listas para copiar en una IA."),
+            ("Data Quality", "data_quality", "Cobertura, límites, transformaciones y privacidad."),
+        ]
+        included = [
+            item
+            for item in section_info
+            if item[1] in self.semantic_model
+            and self.semantic_model[item[1]] not in (None, {}, [])
+        ]
+        for index, (title, _, description) in enumerate(included, 1):
+            lines.append(f"  {index}. {title} -- {description}")
+        lines.append("")
+        for title, key, description in included:
+            lines.extend([
+                title,
+                f'Schema: "{description}"',
+                _json(self.semantic_model[key]),
+                "",
+            ])
+        if self.errors:
+            lines.append("Errores durante la exportación")
+            lines.extend(f"- {error}" for error in self.errors)
+            lines.append("")
+        return "\n".join(lines).rstrip() + "\n"
+
     def _find_latest_export_end_date(self) -> Optional[date]:
-        """Busca la exportación más reciente y obtiene su fecha final."""
-        candidates = sorted(self.out.glob("garmin_export_*.txt"), reverse=True)
+        """Obtiene el final más reciente sin depender del nombre del archivo."""
+        found: list[tuple[date, str]] = []
+        filename_fallbacks: list[tuple[date, str]] = []
+
+        def remember(raw_date, source: str) -> None:
+            try:
+                parsed = date.fromisoformat(str(raw_date)[:10])
+            except (TypeError, ValueError):
+                return
+            if parsed <= self.today:
+                found.append((parsed, source))
+
+        # El lanzador reutiliza un manifiesto estable por perfil. Es la fuente
+        # preferida para nombres personalizados y exportaciones solo XLSX.
+        if self.manifest_path and self.manifest_path.exists():
+            try:
+                manifest = json.loads(
+                    self.manifest_path.read_text(encoding="utf-8")
+                )
+                if (
+                    isinstance(manifest, dict)
+                    and manifest.get("report_type") != "activity"
+                    and manifest.get("status") != "partial"
+                    and manifest.get("export_status") != "partial"
+                ):
+                    remember(manifest.get("end_date"), self.manifest_path.name)
+            except (OSError, json.JSONDecodeError):
+                pass
+
+        timestamp_pattern = re.compile(
+            r"garmin_export_(\d{4}-\d{2}-\d{2}_\d{6})"
+        )
+        range_pattern = re.compile(
+            r"(?:Date range|Intervalo de fechas):\s*(\d{4}-\d{2}-\d{2})"
+            r"\s+(?:to|a)\s+(\d{4}-\d{2}-\d{2})"
+        )
+        metadata_end_pattern = re.compile(
+            r'"(?:requested_end_date|end_date)"\s*:\s*"'
+            r"(\d{4}-\d{2}-\d{2})"
+        )
+        report_type_pattern = re.compile(
+            r'"report_type"\s*:\s*"([^"]+)"'
+        )
+        export_status_pattern = re.compile(
+            r'"export_status"\s*:\s*"([^"]+)"'
+        )
+        for text_path in self.out.glob("*.txt"):
+            if text_path.name.casefold().startswith("analisis_actividad_"):
+                continue
+            try:
+                header = text_path.read_text(encoding="utf-8")[:20_000]
+            except OSError:
+                continue
+            report_match = report_type_pattern.search(header)
+            if report_match and report_match.group(1) == "activity":
+                continue
+            status_match = export_status_pattern.search(header)
+            if status_match and status_match.group(1) == "partial":
+                continue
+            match = range_pattern.search(header)
+            if match:
+                remember(match.group(2), text_path.name)
+                continue
+            match = metadata_end_pattern.search(header)
+            if match:
+                remember(match.group(1), text_path.name)
+                continue
+            timestamp_match = timestamp_pattern.search(text_path.name)
+            if timestamp_match:
+                try:
+                    fallback = datetime.strptime(
+                        timestamp_match.group(1),
+                        "%Y-%m-%d_%H%M%S",
+                    ).date()
+                    filename_fallbacks.append((fallback, text_path.name))
+                except ValueError:
+                    pass
+
+        # Los libros v3 guardan el final solicitado en RESUMEN. La lectura es
+        # opcional y en modo de solo lectura para no cargar sus series.
+        xlsx_paths = list(self.out.glob("*.xlsx"))
+        if xlsx_paths:
+            try:
+                from openpyxl import load_workbook
+            except ImportError:
+                load_workbook = None
+            if load_workbook is not None:
+                for xlsx_path in xlsx_paths:
+                    if xlsx_path.name.casefold().startswith(
+                        "analisis_actividad_"
+                    ):
+                        continue
+                    workbook = None
+                    try:
+                        workbook = load_workbook(
+                            xlsx_path,
+                            read_only=True,
+                            data_only=True,
+                        )
+                        sheet = workbook["RESUMEN"]
+                        summary_values = {}
+                        for row in sheet.iter_rows(
+                            min_row=2,
+                            max_col=2,
+                            values_only=True,
+                        ):
+                            if row and isinstance(row[0], str):
+                                summary_values[row[0]] = row[1]
+                        if (
+                            str(summary_values.get("export.report_type", ""))
+                            .strip()
+                            .casefold()
+                            == "activity"
+                        ):
+                            continue
+                        if (
+                            str(summary_values.get("export.status", ""))
+                            .strip()
+                            .casefold()
+                            == "partial"
+                        ):
+                            continue
+                        remember(
+                            summary_values.get("period.end_date"),
+                            xlsx_path.name,
+                        )
+                    except Exception:
+                        # Un XLSX ajeno o incompleto no debe impedir actualizar.
+                        pass
+                    finally:
+                        if workbook is not None:
+                            workbook.close()
+
+        candidates = found or [
+            item for item in filename_fallbacks if item[0] <= self.today
+        ]
         if not candidates:
             return None
-
-        # Agrupar por marca temporal base e ignorar el sufijo _partNofM.
-        # Ejemplo: garmin_export_2026-03-22_150348_compact_part1of6.txt.
-        ts_pattern = re.compile(r'garmin_export_(\d{4}-\d{2}-\d{2}_\d{6})')
-        timestamps: dict[str, Path] = {}
-        for p in candidates:
-            m = ts_pattern.search(p.name)
-            if m:
-                ts = m.group(1)
-                if ts not in timestamps:
-                    timestamps[ts] = p
-
-        if not timestamps:
-            return None
-
-        # Elegir la exportación más nueva.
-        newest_ts = sorted(timestamps.keys(), reverse=True)[0]
-        newest_file = timestamps[newest_ts]
-
-        # Leer la cabecera y aceptar formatos antiguos y actuales.
-        try:
-            with open(newest_file, "r", encoding="utf-8") as f:
-                header = f.read(2000)
-            m = re.search(
-                r'(?:Date range|Intervalo de fechas):\s*(\S+)\s+'
-                r'(?:to|a)\s+(\S+)',
-                header,
-            )
-            if m:
-                end_str = m.group(2)
-                end_date = date.fromisoformat(end_str)
-                log.info(f"Última exportación encontrada: {newest_file.name} "
-                         f"(termina el {end_date})")
-                return end_date
-        except (OSError, ValueError) as e:
-            log.warning(f"No se pudo interpretar la cabecera de la exportación: {e}")
-
-        # Alternativa: obtener la fecha del timestamp del nombre.
-        try:
-            d = datetime.strptime(newest_ts, "%Y-%m-%d_%H%M%S").date()
-            log.info(f"Se utilizará como alternativa la fecha del archivo: {d}")
-            return d
-        except ValueError:
-            return None
+        latest_end, source = max(candidates, key=lambda item: item[0])
+        log.info(
+            f"Última exportación encontrada: {source} "
+            f"(termina el {latest_end})"
+        )
+        return latest_end
 
     def _detect_start_date(self) -> date:
         """Calcula hasta dónde se remonta el historial de la cuenta.
@@ -2446,11 +3559,19 @@ class GarminExporter:
         if self.update_mode:
             suffix = "_update"
         if self.output_filename:
-            filename = self.output_filename
+            output_stem = _normalise_output_stem(self.output_filename)
+        elif self.report_type == "preparation":
+            output_stem = "revision_preparacion_actual"
+        elif self.report_type == "activity":
+            output_stem = f"analisis_actividad_{self.today}"
         elif self.explicit_start_date is not None and self.explicit_end_date is not None:
-            filename = f"garmin_datos_{self.start_date}_a_{self.today}.txt"
+            output_stem = f"garmin_datos_{self.start_date}_a_{self.today}"
         else:
-            filename = f"garmin_export_{now.strftime('%Y-%m-%d_%H%M%S')}{suffix}.txt"
+            output_stem = (
+                f"garmin_export_{now.strftime('%Y-%m-%d_%H%M%S')}{suffix}"
+            )
+        txt_filename = f"{output_stem}.txt"
+        xlsx_filename = f"{output_stem}.xlsx"
 
         log.info(f"Periodo: {self.start_date} a {self.today} ({self.days} días)")
         if self.update_mode:
@@ -2526,8 +3647,6 @@ class GarminExporter:
                 ("Gear", self.export_gear),
                 ("Hydration", self.export_hydration),
                 ("Nutrition", self.export_nutrition),
-                ("Weekly Summary", self.export_weekly_summary),
-                ("Data Quality", self.export_data_quality),
             ]
         else:
             sections = [
@@ -2620,49 +3739,139 @@ class GarminExporter:
 
         for name, fn in sections:
             log.info(f"Exportando {name}...")
+            _set_safe_call_failure_handler(
+                lambda endpoint, reason, section=name:
+                    self._record_endpoint_failure(
+                        section,
+                        endpoint,
+                        reason,
+                    )
+            )
             try:
-                fn()
-                log.info(f"  Completado: {name}")
-            except KeyboardInterrupt:
-                log.info(f"\n  Interrumpido durante {name}; se guardará la exportación parcial")
-                self.errors.append(
-                    f"{name}: interrumpido por la persona usuaria (datos parciales)"
-                )
-                break
-            except Exception as e:
-                self.errors.append(f"{name}: {e}")
-                log.error(f"  Fallo en {name}: {e}")
-                log.debug(traceback.format_exc())
+                try:
+                    fn()
+                    log.info(f"  Completado: {name}")
+                except KeyboardInterrupt:
+                    log.info(f"\n  Interrumpido durante {name}; se guardará la exportación parcial")
+                    self.errors.append(
+                        f"{name}: interrumpido por la persona usuaria (datos parciales)"
+                    )
+                    break
+                except Exception as e:
+                    reason = _safe_exception_reason(e)
+                    self.errors.append(f"{name}: fallo técnico ({reason})")
+                    log.error(f"  Fallo en {name}: {reason}")
+                    log.debug(
+                        "La traza detallada se ha omitido para no exponer datos "
+                        "devueltos por Garmin."
+                    )
+            finally:
+                _set_safe_call_failure_handler(None)
 
         if self.errors:
             self.md.append("\nErrores durante la exportación\n")
             for err in self.errors:
                 self.md.append(f"- {err}")
             self.md.append("")
+        if not _compact_mode:
+            with self._endpoint_failures_lock:
+                endpoint_failures = sorted(self.endpoint_failures)
+            if endpoint_failures:
+                self.md.append("\nConsultas incompletas\n")
+                for section, endpoint, reason in endpoint_failures:
+                    self.md.append(
+                        f"- {section}: {endpoint} no terminó correctamente "
+                        f"({reason})"
+                    )
+                self.md.append("")
 
         # Las estadísticas se muestran solo en la consola.
 
-        full_text = "\n".join(self.md)
+        needs_text_output = self.output_format in {"txt", "both"}
+        full_text = None
+        if _compact_mode:
+            self._finalize_semantic_model()
+            if needs_text_output:
+                full_text = self._render_compact_text()
+        elif needs_text_output:
+            full_text = "\n".join(self.md)
 
-        if _split_mode:
-            written = self._write_split(full_text, filename)
-            print()
-            log.info(f"Exportación completada: {len(written)} archivos en {self.out}")
-            total_kb = sum(p.stat().st_size for p in written) / 1024
-            log.info(f"Tamaño total: {total_kb:.0f} KB en {len(written)} archivos")
+        written: list[Path] = []
+        if needs_text_output:
+            assert full_text is not None
+            if _split_mode:
+                written.extend(self._write_split(full_text, txt_filename))
+            else:
+                out_path = self.out / txt_filename
+                atomic_write_text(out_path, full_text)
+                written.append(out_path)
+
+        if self.output_format in {"xlsx", "both"}:
+            if not _compact_mode:
+                raise ValueError("La salida XLSX requiere el modo compacto.")
+            xlsx_path = self.out / xlsx_filename
+            log.info("Creando Excel opcional...")
+            xlsx_started = time.perf_counter()
+            render_xlsx(self.semantic_model, xlsx_path)
+            log.info(
+                "Excel creado en %.1f segundos.",
+                time.perf_counter() - xlsx_started,
+            )
+            written.append(xlsx_path)
+
+        self.written_files = written
+        print()
+        result_label = (
+            "Exportación parcial creada"
+            if self._is_partial()
+            else "Exportación completada"
+        )
+        if len(written) == 1:
+            log.info(f"{result_label}: {written[0]}")
         else:
-            out_path = self.out / filename
-            out_path.parent.mkdir(parents=True, exist_ok=True)
-            out_path.write_text(full_text, encoding="utf-8")
-            size_kb = out_path.stat().st_size / 1024
-            print()
-            log.info(f"Exportación completada: {out_path}")
-            log.info(f"Tamaño del archivo: {size_kb:.0f} KB")
+            log.info(
+                f"{result_label}: {len(written)} archivos en {self.out}"
+            )
+        total_kb = sum(path.stat().st_size for path in written) / 1024
+        log.info(
+            f"Tamaño total: {total_kb:.0f} KB"
+            + (f" en {len(written)} archivos" if len(written) > 1 else "")
+        )
+
+        if self.manifest_path:
+            atomic_write_json(
+                self.manifest_path,
+                {
+                    "schema_version": _COMPACT_SCHEMA_VERSION,
+                    "run_id": self.run_id,
+                    "status": (
+                        "partial"
+                        if self._is_partial()
+                        else "completed"
+                    ),
+                    "report_type": self.report_type,
+                    "output_format": self.output_format,
+                    "file_stem": output_stem,
+                    "start_date": self.start_date.isoformat(),
+                    "end_date": self.today.isoformat(),
+                    "files": _relative_manifest_paths(written, self.out),
+                    "warnings": len(
+                        (self.semantic_model.get("data_quality") or {}).get(
+                            "issues",
+                            [],
+                        )
+                    ),
+                    "errors": self._partial_sections(),
+                },
+            )
 
         log.info(f"Llamadas a la API: {_limiter.call_count}")
         log.info(self.cache.summary())
-        if self.errors:
-            log.warning(f"{len(self.errors)} secciones tuvieron errores")
+        if self._is_partial():
+            log.warning(
+                f"{len(self._partial_sections())} secciones quedaron incompletas"
+            )
+        return written
 
     def _write_split(self, full_text: str, base_filename: str) -> list:
         """Divide la exportación en archivos bajo el límite de palabras.
@@ -2673,8 +3882,10 @@ class GarminExporter:
         """
         # Nombres técnicos de sección que aparecen en una línea independiente.
         section_names_list = [
-            "Export Metadata", "Profile", "Daily Health", "Blood Pressure",
-            "Activities", "Body Composition",
+            "Export Metadata", "Race Context", "Profile", "Period Summary",
+            "Weekly Timeline", "Daily Health", "Blood Pressure",
+            "Activities", "Body Composition", "Race Analysis",
+            "Suggested Prompts", "Journal",
             "Training Metrics", "Goals and Records", "Trends", "Golf",
             "Gear", "Training Plans", "Workouts", "Hydration", "Nutrition",
             "Weekly Summary", "Data Quality", "Women's Health",
@@ -2743,8 +3954,7 @@ class GarminExporter:
             suffix = f"_split_part{i}of{total}"
             fname = base_filename.replace(".txt", f"{suffix}.txt")
             path = self.out / fname
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
+            atomic_write_text(path, content)
 
             wc = _word_count(content)
             size_kb = path.stat().st_size / 1024
@@ -2855,26 +4065,28 @@ class GarminExporter:
         self.md.append(
             'Schema: "Metadatos versionados de esta exportación compacta semántica."'
         )
-        self.md.append(_json({
-            "export_metadata": {
-                "exported_at": current.isoformat(),
-                "requested_start_date": self.start_date.isoformat(),
-                "requested_end_date": self.today.isoformat(),
-                "timezone": self.timezone_name,
-                "utc_offset": historical_offset,
-                "utc_offset_date": self.today.isoformat(),
-                "mode": "compact",
-                "activity_series_mode": (
-                    "full" if self.include_activity_details else "none"
-                ),
-                "export_variant": (
-                    "compact_with_full_activity_series"
-                    if self.include_activity_details
-                    else "compact_summary"
-                ),
-                "schema_version": _COMPACT_SCHEMA_VERSION,
-            }
-        }))
+        metadata = {
+            "exported_at": current.isoformat(),
+            "requested_start_date": self.start_date.isoformat(),
+            "requested_end_date": self.today.isoformat(),
+            "timezone": self.timezone_name,
+            "utc_offset": historical_offset,
+            "utc_offset_date": self.today.isoformat(),
+            "mode": "compact",
+            "report_type": self.report_type,
+            "activity_series_mode": (
+                "full" if self.include_activity_details else "none"
+            ),
+            "export_variant": (
+                "compact_with_full_activity_series"
+                if self.include_activity_details
+                else "compact_summary"
+            ),
+            "free_text_included": self.include_free_text,
+            "schema_version": _COMPACT_SCHEMA_VERSION,
+        }
+        self._remember_compact("export_metadata", metadata)
+        self.md.append(_json({"export_metadata": metadata}))
         self.md.append("")
 
     # ===================================================================
@@ -2885,6 +4097,7 @@ class GarminExporter:
         if cached is not None and not self.update_mode:
             data = cached
         else:
+            failures_before_cache = self._endpoint_failure_count()
             data = {}
             data["full_name"] = safe_call(self.api.get_full_name, label="full_name")
             data["unit_system"] = safe_call(self.api.get_unit_system, label="unit_system")
@@ -2895,9 +4108,17 @@ class GarminExporter:
             data["device_alarms"] = safe_call(self.api.get_device_alarms, label="device_alarms")
             data["last_used_device"] = safe_call(self.api.get_device_last_used, label="last_used_device")
             data["activity_types"] = safe_call(self.api.get_activity_types, label="activity_types")
-            self.cache.put_section("profile", data)
+            self.cache.put_section(
+                "profile",
+                data,
+                complete=(
+                    self._endpoint_failure_count()
+                    == failures_before_cache
+                ),
+            )
 
         if _compact_mode:
+            self._remember_sensitive_payload(data)
             profile = _compact_profile(
                 data,
                 self.today,
@@ -2909,6 +4130,7 @@ class GarminExporter:
                 'fecha de nacimiento exacta, nombres, IDs de usuario o dispositivo, '
                 'números de serie, URLs, alarmas, capacidades y catálogos."\n'
             )
+            self._remember_compact("profile", profile)
             self.md.append(f"{_json({'profile': profile})}\n")
         else:
             self.md.append("\nProfile\n")
@@ -2951,35 +4173,89 @@ class GarminExporter:
             """Consulta un endpoint para una fecha; se ejecuta en un hilo."""
             api = self.api
             if key == "summary":
-                return safe_call(api.get_user_summary, ds, label=f"summary_{ds}")
+                return _safe_call_with_status(
+                    api.get_user_summary,
+                    ds,
+                    label=f"summary_{ds}",
+                )
             elif key == "heart_rate":
-                return safe_call(api.get_heart_rates, ds, label=f"hr_{ds}")
+                return _safe_call_with_status(
+                    api.get_heart_rates,
+                    ds,
+                    label=f"hr_{ds}",
+                )
             elif key == "rhr":
-                return safe_call(api.get_rhr_day, ds, label=f"rhr_{ds}")
+                return _safe_call_with_status(
+                    api.get_rhr_day,
+                    ds,
+                    label=f"rhr_{ds}",
+                )
             elif key == "sleep":
-                payload = safe_call(api.get_sleep_data, ds, label=f"sleep_{ds}")
+                payload, succeeded = _safe_call_with_status(
+                    api.get_sleep_data,
+                    ds,
+                    label=f"sleep_{ds}",
+                )
                 _debug_health_payload("sleep", ds, payload, "api")
-                return payload
+                return payload, succeeded
             elif key == "stress":
-                return safe_call(api.get_all_day_stress, ds, label=f"stress_{ds}")
+                return _safe_call_with_status(
+                    api.get_all_day_stress,
+                    ds,
+                    label=f"stress_{ds}",
+                )
             elif key == "spo2":
-                return safe_call(api.get_spo2_data, ds, label=f"spo2_{ds}")
+                return _safe_call_with_status(
+                    api.get_spo2_data,
+                    ds,
+                    label=f"spo2_{ds}",
+                )
             elif key == "respiration":
-                return safe_call(api.get_respiration_data, ds, label=f"resp_{ds}")
+                return _safe_call_with_status(
+                    api.get_respiration_data,
+                    ds,
+                    label=f"resp_{ds}",
+                )
             elif key == "hrv":
-                payload = safe_call(api.get_hrv_data, ds, label=f"hrv_{ds}")
+                payload, succeeded = _safe_call_with_status(
+                    api.get_hrv_data,
+                    ds,
+                    label=f"hrv_{ds}",
+                )
                 _debug_health_payload("hrv", ds, payload, "api")
-                return payload
+                return payload, succeeded
             elif key == "body_battery":
-                return safe_call(api.get_body_battery, ds, ds, label=f"bb_{ds}")
+                return _safe_call_with_status(
+                    api.get_body_battery,
+                    ds,
+                    ds,
+                    label=f"bb_{ds}",
+                )
             elif key == "bb_events":
-                return safe_call(api.get_body_battery_events, ds, label=f"bbe_{ds}")
+                return _safe_call_with_status(
+                    api.get_body_battery_events,
+                    ds,
+                    label=f"bbe_{ds}",
+                )
             elif key == "intensity_min":
-                return safe_call(api.get_intensity_minutes_data, ds, label=f"im_{ds}")
+                return _safe_call_with_status(
+                    api.get_intensity_minutes_data,
+                    ds,
+                    label=f"im_{ds}",
+                )
             elif key == "events":
-                return safe_call(api.get_all_day_events, ds, label=f"events_{ds}")
+                return _safe_call_with_status(
+                    api.get_all_day_events,
+                    ds,
+                    label=f"events_{ds}",
+                )
             elif key == "lifestyle":
-                return safe_call(api.get_lifestyle_logging_data, ds, label=f"ll_{ds}")
+                return _safe_call_with_status(
+                    api.get_lifestyle_logging_data,
+                    ds,
+                    label=f"ll_{ds}",
+                )
+            return None, True
 
         t_start = time.time()
         cached_days = 0
@@ -2991,27 +4267,50 @@ class GarminExporter:
             ds = d.isoformat()
 
             # Consultar primero la caché.
-            day_data = self.cache.get_day(ds)
+            day_data, complete_keys = self.cache.get_day_entry(ds)
             if day_data is not None:
                 cached_days += 1
                 _debug_health_payload("sleep", ds, day_data.get("sleep"), "cache")
                 _debug_health_payload("hrv", ds, day_data.get("hrv"), "cache")
             else:
-                # Consultar los 13 endpoints en paralelo con cuatro hilos.
                 day_data = {}
+                complete_keys = set()
+
+            recent_cutoff = self.today - timedelta(days=2)
+            keys_to_fetch = (
+                endpoint_keys
+                if self.update_mode or d >= recent_cutoff
+                else [
+                    key
+                    for key in endpoint_keys
+                    if key not in complete_keys
+                ]
+            )
+            if keys_to_fetch:
+                # Consultar en paralelo lo reciente o lo que falló anteriormente.
                 with ThreadPoolExecutor(max_workers=4) as pool:
                     futures = {
                         pool.submit(_fetch_endpoint, key, ds): key
-                        for key in endpoint_keys
+                        for key in keys_to_fetch
                     }
                     for future in as_completed(futures):
                         key = futures[future]
                         try:
-                            day_data[key] = future.result()
-                        except Exception:
-                            day_data[key] = None
-
-                self.cache.put_day(ds, day_data)
+                            value, succeeded = future.result()
+                            if succeeded:
+                                day_data[key] = value
+                                complete_keys.add(key)
+                        except Exception as exc:
+                            self._record_endpoint_failure(
+                                "Daily Health",
+                                "worker",
+                                _safe_exception_reason(exc),
+                            )
+                self.cache.put_day(
+                    ds,
+                    day_data,
+                    complete_keys=complete_keys,
+                )
 
             # Añadir los datos al documento.
             if _compact_mode:
@@ -3020,6 +4319,7 @@ class GarminExporter:
                     day_data,
                     timezone_name=self.timezone_name,
                     quality_callback=self._quality_add,
+                    include_free_text=self.include_free_text,
                 )
                 all_days.append(record)
                 self.compact_daily_records.append(record)
@@ -3060,6 +4360,9 @@ class GarminExporter:
 
         if _compact_mode:
             if all_days:
+                all_days.sort(key=lambda item: item.get("date", ""))
+                self.compact_daily_records = list(all_days)
+                self._remember_compact("daily_health", all_days)
                 self.md.append(
                     'Schema: "Un objeto semántico y privado por fecha. Se omiten series '
                     'de bienestar de alta frecuencia, campos duplicados y catálogos de '
@@ -3115,6 +4418,8 @@ class GarminExporter:
                     "El endpoint de presión arterial no devolvió mediciones reales.",
                 )
                 return
+            measurements.sort(key=lambda item: str(item.get("timestamp") or ""))
+            self._remember_compact("blood_pressure", measurements)
             self.md.append("\nBlood Pressure\n")
             self.md.append(
                 'Schema: "Solo mediciones reales con valores sistólico y diastólico; '
@@ -3152,6 +4457,24 @@ class GarminExporter:
                     label="activities_by_date",
                 ) or []
 
+        if self.selected_activity_ref:
+            selected = str(self.selected_activity_ref)
+            activities = [
+                activity
+                for activity in activities
+                if private_reference(
+                    "activity",
+                    activity.get("activityId"),
+                    self.reference_secret,
+                )
+                == selected
+            ]
+            if not activities:
+                raise ValueError(
+                    "No se encontró la actividad seleccionada en el periodo. "
+                    "Actualiza la lista de actividades y vuelve a intentarlo."
+                )
+
         self.md.append(f"Total de actividades encontradas: {len(activities)}\n")
         calls_per_activity = 11 if _compact_mode else 10
         log.info(
@@ -3166,8 +4489,15 @@ class GarminExporter:
             all_activities = []
 
         for i, act in enumerate(activities):
+            failures_before_activity = self._endpoint_failure_count()
             aid = act.get("activityId", i)
             name = act.get("activityName") or "Sin nombre"
+            if _compact_mode:
+                self._remember_sensitive_payload(act)
+            if act.get("activityId") is not None:
+                self.sensitive_identifiers.add(str(act.get("activityId")))
+            if act.get("activityName"):
+                self.sensitive_activity_names.add(str(act.get("activityName")))
             atype = (act.get("activityType", {}).get("typeKey", "?")
                      if isinstance(act.get("activityType"), dict)
                      else str(act.get("activityType", "?")))
@@ -3181,48 +4511,96 @@ class GarminExporter:
             act_data = self.cache.get_activity(aid)
             if act_data is not None:
                 cached_acts += 1
-                cache_changed = False
-                if _compact_mode:
-                    # La lista reciente puede contener metadatos ya corregidos.
-                    act_data["summary"] = act
-                    cache_changed = True
-                    activity_date = None
-                    if isinstance(start, str):
-                        try:
-                            activity_date = date.fromisoformat(start[:10])
-                        except ValueError:
-                            pass
-                    recent_cutoff = date.today() - timedelta(
-                        days=_RECENT_ACTIVITY_REFRESH_DAYS
+                # La lista reciente puede contener metadatos ya corregidos.
+                act_data["summary"] = act
+                cache_changed = True
+                activity_date = None
+                if isinstance(start, str):
+                    try:
+                        activity_date = date.fromisoformat(start[:10])
+                    except ValueError:
+                        pass
+                recent_cutoff = self.today - timedelta(
+                    days=_RECENT_ACTIVITY_REFRESH_DAYS
+                )
+                is_recent = (
+                    activity_date is not None
+                    and activity_date >= recent_cutoff
+                )
+                if is_recent:
+                    refreshed_detail, succeeded = _safe_call_with_status(
+                        self.api.get_activity,
+                        aid,
+                        label=f"act_refresh_{aid}",
                     )
-                    if activity_date is not None and activity_date >= recent_cutoff:
-                        refreshed_detail = safe_call(
-                            self.api.get_activity,
-                            aid,
-                            label=f"act_refresh_{aid}",
-                        )
-                        if refreshed_detail is not None:
-                            act_data["detail"] = refreshed_detail
-                            cache_changed = True
+                    if succeeded:
+                        act_data["detail"] = refreshed_detail
+                        cache_changed = True
 
+                wants_full_series = (
+                    self.include_activity_details or not _compact_mode
+                )
+                cached_detail_limit = act_data.get(
+                    "_details_maxchart_requested"
+                )
+                full_series_was_requested = (
+                    isinstance(cached_detail_limit, int)
+                    and not isinstance(cached_detail_limit, bool)
+                    and cached_detail_limit >= _MAX_ACTIVITY_CHART_POINTS
+                )
+                should_refresh_series = (
+                    wants_full_series
+                    and (
+                        self.selected_activity_ref is not None
+                        or is_recent
+                        or not full_series_was_requested
+                    )
+                )
+                if should_refresh_series:
+                    refreshed_series, succeeded = _safe_call_with_status(
+                        self.api.get_activity_details,
+                        aid,
+                        maxchart=_MAX_ACTIVITY_CHART_POINTS,
+                        label=f"details_refresh_{aid}",
+                    )
+                    if succeeded:
+                        act_data["details"] = refreshed_series
+                        act_data[
+                            "_details_maxchart_requested"
+                        ] = _MAX_ACTIVITY_CHART_POINTS
+                        cache_changed = True
+
+                if _compact_mode:
                     should_refresh_gear = (
                         "gear" not in act_data
-                        or (activity_date is not None and activity_date >= recent_cutoff)
+                        or is_recent
                     )
-                    if should_refresh_gear and hasattr(self.api, "get_activity_gear"):
-                        act_data["gear"] = safe_call(
+                    if (
+                        should_refresh_gear
+                        and hasattr(self.api, "get_activity_gear")
+                    ):
+                        refreshed_gear, succeeded = _safe_call_with_status(
                             self.api.get_activity_gear,
                             aid,
                             label=f"activity_gear_{aid}",
                         )
-                        cache_changed = True
+                        if succeeded:
+                            act_data["gear"] = refreshed_gear
+                            cache_changed = True
                     elif should_refresh_gear:
                         self._quality_add(
                             "warnings",
                             "La versión instalada no permite consultar el equipamiento por actividad.",
                         )
-                    if cache_changed:
-                        self.cache.put_activity(aid, act_data)
+                if cache_changed:
+                    self.cache.put_activity(
+                        aid,
+                        act_data,
+                        complete=(
+                            self._endpoint_failure_count()
+                            == failures_before_activity
+                        ),
+                    )
             else:
                 # Consultar la API y guardar en caché.
                 act_data = {"summary": act}
@@ -3234,20 +4612,55 @@ class GarminExporter:
                 act_data["hr_zones"] = safe_call(self.api.get_activity_hr_in_timezones, aid, label=f"hrz_{aid}")
                 act_data["power_zones"] = safe_call(self.api.get_activity_power_in_timezones, aid, label=f"pwrz_{aid}")
                 act_data["exercise_sets"] = safe_call(self.api.get_activity_exercise_sets, aid, label=f"sets_{aid}")
-                act_data["details"] = safe_call(self.api.get_activity_details, aid, label=f"details_{aid}")
+                detail_limit = (
+                    _MAX_ACTIVITY_CHART_POINTS
+                    if self.include_activity_details or not _compact_mode
+                    else 2000
+                )
+                details, details_succeeded = _safe_call_with_status(
+                    self.api.get_activity_details,
+                    aid,
+                    maxchart=detail_limit,
+                    label=f"details_{aid}",
+                )
+                act_data["details"] = details
+                if details_succeeded:
+                    act_data["_details_maxchart_requested"] = detail_limit
                 if _compact_mode and hasattr(self.api, "get_activity_gear"):
                     act_data["gear"] = safe_call(
                         self.api.get_activity_gear,
                         aid,
                         label=f"activity_gear_{aid}",
                     )
-                self.cache.put_activity(aid, act_data)
+                self.cache.put_activity(
+                    aid,
+                    act_data,
+                    complete=(
+                        self._endpoint_failure_count()
+                        == failures_before_activity
+                    ),
+                )
 
             if _compact_mode:
+                for gear_item in _as_list(act_data.get("gear")):
+                    if not isinstance(gear_item, dict):
+                        continue
+                    gear_id = _pick(
+                        gear_item,
+                        "uuid",
+                        "gearUUID",
+                        "gearId",
+                        "gearPk",
+                        "id",
+                    )
+                    if gear_id is not None:
+                        self.sensitive_identifiers.add(str(gear_id))
                 compact_activity = _compact_activity(
                     act_data,
                     include_series=self.include_activity_details,
                     quality_callback=self._quality_add,
+                    reference_secret=self.reference_secret,
+                    include_free_text=self.include_free_text,
                 )
                 if compact_activity:
                     all_activities.append(compact_activity)
@@ -3279,6 +4692,9 @@ class GarminExporter:
 
         if _compact_mode:
             if all_activities:
+                all_activities.sort(key=lambda item: item.get("date", ""))
+                self.compact_activities = list(all_activities)
+                self._remember_compact("activities", all_activities)
                 self.md.append(
                     'Schema: "Actividades normalizadas y privadas. Se conservan todas '
                     'las actividades y vueltas; se eliminan fuentes duplicadas, datos '
@@ -3323,17 +4739,27 @@ class GarminExporter:
         if cached is not None and not self.update_mode:
             data = cached
         else:
+            failures_before_cache = self._endpoint_failure_count()
             data = {}
             data["body_comp"] = _chunked_date_call(self.api.get_body_composition,
                                                    self.start_date, self.today, "body_comp")
             data["weigh_ins"] = _chunked_date_call(self.api.get_weigh_ins,
                                                    self.start_date, self.today, "weigh_ins")
-            self.cache.put_section(cache_key, data)
+            self.cache.put_section(
+                cache_key,
+                data,
+                complete=(
+                    self._endpoint_failure_count()
+                    == failures_before_cache
+                ),
+            )
 
         if _compact_mode:
             measurements = _compact_body_composition(data)
             if not measurements:
                 return
+            measurements.sort(key=lambda item: str(item.get("date") or ""))
+            self._remember_compact("body_composition", measurements)
             self.md.append("\nBody Composition\n")
             self.md.append(
                 'Schema: "Mediciones únicas del intervalo. Peso, masa muscular y masa '
@@ -3362,6 +4788,7 @@ class GarminExporter:
         if cached is not None and not self.update_mode:
             data = cached
         else:
+            failures_before_cache = self._endpoint_failure_count()
             today_s = self.today.isoformat()
             start_s = self.start_date.isoformat()
 
@@ -3396,7 +4823,14 @@ class GarminExporter:
             for key, title, result in items:
                 data[key] = result
                 data[f"_title_{key}"] = title
-            self.cache.put_section(cache_key, data)
+            self.cache.put_section(
+                cache_key,
+                data,
+                complete=(
+                    self._endpoint_failure_count()
+                    == failures_before_cache
+                ),
+            )
 
         if _compact_mode:
             compact_data, snapshots = _compact_training(
@@ -3405,6 +4839,7 @@ class GarminExporter:
                 self.today,
             )
             self.compact_training = compact_data
+            self._remember_compact("training_metrics", compact_data)
             self.md.append(
                 'Schema: "Métricas clasificadas como datos del periodo, último dato '
                 'anterior, fotografía actual posterior o sin fecha. Se eliminan '
@@ -3444,15 +4879,27 @@ class GarminExporter:
         if cached is not None and not self.update_mode:
             data = cached
         else:
+            failures_before_cache = self._endpoint_failure_count()
             data = {}
             data["personal_records"] = safe_call(self.api.get_personal_record, label="personal_records")
             data["badges"] = safe_call(self.api.get_earned_badges, label="badges")
             data["active_goals"] = safe_call(self.api.get_goals, "active", 0, 100, label="active_goals")
             data["past_goals"] = safe_call(self.api.get_goals, "past", 0, 100, label="past_goals")
-            self.cache.put_section("goals", data)
+            self.cache.put_section(
+                "goals",
+                data,
+                complete=(
+                    self._endpoint_failure_count()
+                    == failures_before_cache
+                ),
+            )
 
         if _compact_mode:
-            compact_data = _compact_personal_records(data)
+            compact_data = _compact_personal_records(
+                data,
+                include_free_text=self.include_free_text,
+            )
+            self._remember_compact("goals_and_records", compact_data or {})
             self.md.append(
                 'Schema: "Récords personales y objetivos activos reducidos. Se omiten '
                 'insignias y objetivos pasados en las exportaciones semanales para IA."\n'
@@ -3475,6 +4922,7 @@ class GarminExporter:
         if cached is not None and not self.update_mode:
             data = cached
         else:
+            failures_before_cache = self._endpoint_failure_count()
             start_s = self.start_date.isoformat()
             today_s = self.today.isoformat()
 
@@ -3497,7 +4945,14 @@ class GarminExporter:
             # El endpoint de batería corporal por intervalo devuelve 400.
             # Los valores diarios ya están en las secciones de salud.
             data["bb_range"] = None
-            self.cache.put_section(cache_key, data)
+            self.cache.put_section(
+                cache_key,
+                data,
+                complete=(
+                    self._endpoint_failure_count()
+                    == failures_before_cache
+                ),
+            )
 
         if _compact_mode:
             compact_data = {k: v for k, v in data.items() if k != "bb_range"}
@@ -3522,6 +4977,7 @@ class GarminExporter:
         if cached is not None and not self.update_mode:
             data = cached
         else:
+            failures_before_cache = self._endpoint_failure_count()
             data = {}
             summary = safe_call(self.api.get_golf_summary, label="golf_summary")
             data["summary"] = summary
@@ -3538,7 +4994,14 @@ class GarminExporter:
                     scorecards.append(sc)
 
             data["scorecards"] = scorecards
-            self.cache.put_section("golf", data)
+            self.cache.put_section(
+                "golf",
+                data,
+                complete=(
+                    self._endpoint_failure_count()
+                    == failures_before_cache
+                ),
+            )
 
         if not data.get("summary") and not data.get("scorecards"):
             _section_nodata(self.md, "Golf")
@@ -3560,11 +5023,21 @@ class GarminExporter:
             isinstance(cached, dict)
             and cached.get("gear_list") is not None
         )
-        if cached is not None and cached_has_result and not self.update_mode:
+        should_refresh = (
+            not cached_has_result
+            or self.cache.section_needs_refresh(
+                "gear",
+                _GEAR_REFRESH_DAYS,
+            )
+        )
+        if cached_has_result and not should_refresh:
             data = cached
         else:
             # Los endpoints de equipamiento necesitan el número de perfil.
-            profile = safe_call(self.api.get_user_profile, label="gear_profile")
+            profile, profile_succeeded = _safe_call_with_status(
+                self.api.get_user_profile,
+                label="gear_profile",
+            )
             profile_num = None
             if profile and isinstance(profile, dict):
                 profile_num = str(
@@ -3575,9 +5048,27 @@ class GarminExporter:
                 )
 
             data = {}
+            refresh_complete = profile_succeeded and bool(profile_num)
             if profile_num:
-                data["gear_list"] = safe_call(self.api.get_gear, profile_num, label="gear_list")
-                data["gear_defaults"] = safe_call(self.api.get_gear_defaults, profile_num, label="gear_defaults")
+                data["gear_list"], list_succeeded = _safe_call_with_status(
+                    self.api.get_gear,
+                    profile_num,
+                    label="gear_list",
+                )
+                data["gear_defaults"], defaults_succeeded = (
+                    _safe_call_with_status(
+                        self.api.get_gear_defaults,
+                        profile_num,
+                        label="gear_defaults",
+                    )
+                )
+                gear_list_valid = isinstance(data["gear_list"], list)
+                refresh_complete = (
+                    refresh_complete
+                    and list_succeeded
+                    and gear_list_valid
+                    and defaults_succeeded
+                )
             else:
                 data["gear_list"] = None
                 data["gear_defaults"] = None
@@ -3589,24 +5080,66 @@ class GarminExporter:
                     if not uuid:
                         continue
                     g = {"_uuid": uuid}
-                    g["stats"] = safe_call(self.api.get_gear_stats, uuid, label=f"gear_stats_{uuid}")
+                    g["stats"], stats_succeeded = _safe_call_with_status(
+                        self.api.get_gear_stats,
+                        uuid,
+                        label=f"gear_stats_{uuid}",
+                    )
+                    refresh_complete = refresh_complete and stats_succeeded
                     gear_details.append(g)
 
             data["gear_details"] = gear_details
-            self.cache.put_section("gear", data)
+            if refresh_complete:
+                self.cache.put_section("gear", data, complete=True)
+            elif cached_has_result:
+                # Una incidencia temporal nunca debe destruir ni ocultar la
+                # última fotografía completa de equipamiento.
+                data = cached
+            else:
+                self.cache.put_section("gear", data, complete=False)
 
         if _compact_mode:
-            gear = _compact_gear_section(data)
+            self._remember_sensitive_payload(data.get("gear_list"))
+            for gear_item in _as_list(data.get("gear_list")):
+                if not isinstance(gear_item, dict):
+                    continue
+                gear_id = _pick(
+                    gear_item,
+                    "uuid",
+                    "gearUUID",
+                    "gearId",
+                    "gearPk",
+                    "id",
+                )
+                if gear_id is not None:
+                    self.sensitive_identifiers.add(str(gear_id))
+            gear = _compact_gear_section(
+                data,
+                reference_secret=self.reference_secret,
+                include_free_text=self.include_free_text,
+            )
             if not gear:
                 self._quality_add(
                     "warnings",
                     "Garmin no devolvió una lista global de equipamiento.",
                 )
                 return
+            _enrich_activity_gear_from_catalog(
+                self.compact_activities,
+                gear,
+            )
+            if self.compact_activities:
+                self._remember_compact(
+                    "activities",
+                    self.compact_activities,
+                )
+            self._remember_compact("gear", gear)
             self.md.append("\nGear\n")
             self.md.append(
-                'Schema: "Lista privada de equipamiento. Se excluyen IDs de perfil, '
-                'valores predeterminados, datos de dispositivos y campos técnicos."\n'
+                'Schema: "Lista privada de equipamiento con nombre, fabricante y '
+                'modelo para interpretar las actividades. El texto personalizado se '
+                'marca como user_provided. Se excluyen IDs reales, valores '
+                'predeterminados, datos de dispositivos y campos técnicos."\n'
             )
             self.md.append(f"{_json({'gear': gear})}\n")
         else:
@@ -3629,6 +5162,7 @@ class GarminExporter:
         if cached is not None and not self.update_mode:
             data = cached
         else:
+            failures_before_cache = self._endpoint_failure_count()
             data = {}
             plans = safe_call(self.api.get_training_plans, label="training_plans")
             data["plans"] = plans
@@ -3649,7 +5183,14 @@ class GarminExporter:
                     plan_details.append(p)
 
             data["plan_details"] = plan_details
-            self.cache.put_section("training_plans", data)
+            self.cache.put_section(
+                "training_plans",
+                data,
+                complete=(
+                    self._endpoint_failure_count()
+                    == failures_before_cache
+                ),
+            )
 
         if not data.get("plans"):
             _section_nodata(self.md, "Training Plans")
@@ -3671,6 +5212,7 @@ class GarminExporter:
         if cached is not None and not self.update_mode:
             data = cached
         else:
+            failures_before_cache = self._endpoint_failure_count()
             data = {}
             workout_list = safe_call(self.api.get_workouts, 0, 1000, label="workouts")
             data["workout_list"] = workout_list
@@ -3686,7 +5228,14 @@ class GarminExporter:
                     workout_details.append(w)
 
             data["workout_details"] = workout_details
-            self.cache.put_section("workouts", data)
+            self.cache.put_section(
+                "workouts",
+                data,
+                complete=(
+                    self._endpoint_failure_count()
+                    == failures_before_cache
+                ),
+            )
 
         if not data.get("workout_list"):
             _section_nodata(self.md, "Workouts")
@@ -3709,15 +5258,25 @@ class GarminExporter:
         # Separar los días ya almacenados de los pendientes.
         days_list = []
         cached_results = {}
+        cached_complete_keys = {}
         uncached_dates = []
+        recent_cutoff = self.today - timedelta(days=2)
         for i in range(self.days):
             d = self.today - timedelta(days=i)
             ds = d.isoformat()
             days_list.append(ds)
-            cached = self.cache.get_day(f"hydration_{ds}")
+            cached, complete_keys = self.cache.get_day_entry(
+                f"hydration_{ds}"
+            )
             if cached is not None:
                 cached_results[ds] = cached
-            else:
+            cached_complete_keys[ds] = complete_keys
+            if (
+                cached is None
+                or self.update_mode
+                or d >= recent_cutoff
+                or "hydration" not in complete_keys
+            ):
                 uncached_dates.append(ds)
 
         log.info(f"  {len(cached_results)} en caché, {len(uncached_dates)} por descargar")
@@ -3727,14 +5286,30 @@ class GarminExporter:
         if uncached_dates:
             api = self.api
             def _fetch_hydration(ds):
-                return ds, safe_call(api.get_hydration_data, ds, label=f"hydration_{ds}")
+                result, succeeded = _safe_call_with_status(
+                    api.get_hydration_data,
+                    ds,
+                    label=f"hydration_{ds}",
+                )
+                return ds, result, succeeded
 
             t_start = time.time()
             done = 0
             with ThreadPoolExecutor(max_workers=4) as pool:
-                for ds, result in pool.map(lambda ds: _fetch_hydration(ds), uncached_dates):
-                    data = {"hydration": result}
-                    self.cache.put_day(f"hydration_{ds}", data)
+                for ds, result, succeeded in pool.map(
+                    lambda ds: _fetch_hydration(ds),
+                    uncached_dates,
+                ):
+                    data = dict(cached_results.get(ds) or {})
+                    complete_keys = set(cached_complete_keys.get(ds) or set())
+                    if succeeded:
+                        data["hydration"] = result
+                        complete_keys.add("hydration")
+                    self.cache.put_day(
+                        f"hydration_{ds}",
+                        data,
+                        complete_keys=complete_keys,
+                    )
                     fetched_results[ds] = data
                     done += 1
                     if done % 50 == 0 or done == len(uncached_dates):
@@ -3747,7 +5322,7 @@ class GarminExporter:
         if _compact_mode:
             all_days = {}
             for ds in days_list:
-                day_data = cached_results.get(ds) or fetched_results.get(ds)
+                day_data = fetched_results.get(ds) or cached_results.get(ds)
                 compact = (
                     _compact_hydration(day_data.get("hydration"))
                     if day_data
@@ -3756,6 +5331,7 @@ class GarminExporter:
                 if compact:
                     all_days[ds] = compact
             if all_days:
+                self._remember_compact("hydration", dict(sorted(all_days.items())))
                 self.md.append("\nHydration\n")
                 self.md.append(
                     'Schema: "Solo fechas con ingesta real, ingesta durante actividad '
@@ -3765,7 +5341,7 @@ class GarminExporter:
         else:
             has_data = False
             for ds in days_list:
-                day_data = cached_results.get(ds) or fetched_results.get(ds)
+                day_data = fetched_results.get(ds) or cached_results.get(ds)
                 if day_data and day_data.get("hydration"):
                     has_data = True
                     self.md.append(f"{ds}\n")
@@ -3784,15 +5360,30 @@ class GarminExporter:
         # Separar los días ya almacenados de los pendientes.
         days_list = []
         cached_results = {}
+        cached_complete_keys = {}
         uncached_dates = []
+        recent_cutoff = self.today - timedelta(days=2)
         for i in range(self.days):
             d = self.today - timedelta(days=i)
             ds = d.isoformat()
             days_list.append(ds)
-            cached = self.cache.get_day(f"nutrition_{ds}")
+            cached, complete_keys = self.cache.get_day_entry(
+                f"nutrition_{ds}"
+            )
             if cached is not None:
                 cached_results[ds] = cached
-            else:
+            cached_complete_keys[ds] = complete_keys
+            required_keys = (
+                {"food_log", "meals"}
+                if _compact_mode
+                else {"food_log", "meals", "settings"}
+            )
+            if (
+                cached is None
+                or self.update_mode
+                or d >= recent_cutoff
+                or not required_keys.issubset(complete_keys)
+            ):
                 uncached_dates.append(ds)
 
         log.info(f"  {len(cached_results)} en caché, {len(uncached_dates)} por descargar")
@@ -3802,24 +5393,50 @@ class GarminExporter:
         if uncached_dates:
             api = self.api
             def _fetch_nutrition(ds):
-                fl = safe_call(api.get_nutrition_daily_food_log, ds, label=f"food_{ds}")
-                ml = safe_call(api.get_nutrition_daily_meals, ds, label=f"meals_{ds}")
-                st = (
-                    None
-                    if _compact_mode
-                    else safe_call(
+                existing = dict(cached_results.get(ds) or {})
+                complete_keys = set(cached_complete_keys.get(ds) or set())
+                values = {}
+                calls = {
+                    "food_log": (
+                        api.get_nutrition_daily_food_log,
+                        f"food_{ds}",
+                    ),
+                    "meals": (
+                        api.get_nutrition_daily_meals,
+                        f"meals_{ds}",
+                    ),
+                }
+                if not _compact_mode:
+                    calls["settings"] = (
                         api.get_nutrition_daily_settings,
-                        ds,
-                        label=f"nutr_set_{ds}",
+                        f"nutr_set_{ds}",
                     )
-                )
-                return ds, {"food_log": fl, "meals": ml, "settings": st}
+                for key, (function, label) in calls.items():
+                    value, succeeded = _safe_call_with_status(
+                        function,
+                        ds,
+                        label=label,
+                    )
+                    if succeeded:
+                        values[key] = value
+                        complete_keys.add(key)
+                existing.update(values)
+                if _compact_mode:
+                    existing.setdefault("settings", None)
+                return ds, existing, complete_keys
 
             t_start = time.time()
             done = 0
             with ThreadPoolExecutor(max_workers=4) as pool:
-                for ds, data in pool.map(lambda ds: _fetch_nutrition(ds), uncached_dates):
-                    self.cache.put_day(f"nutrition_{ds}", data)
+                for ds, data, complete_keys in pool.map(
+                    lambda ds: _fetch_nutrition(ds),
+                    uncached_dates,
+                ):
+                    self.cache.put_day(
+                        f"nutrition_{ds}",
+                        data,
+                        complete_keys=complete_keys,
+                    )
                     fetched_results[ds] = data
                     done += 1
                     if done % 50 == 0 or done == len(uncached_dates):
@@ -3832,11 +5449,12 @@ class GarminExporter:
         if _compact_mode:
             all_days = {}
             for ds in days_list:
-                day_data = cached_results.get(ds) or fetched_results.get(ds)
+                day_data = fetched_results.get(ds) or cached_results.get(ds)
                 compact = _compact_nutrition(day_data) if day_data else None
                 if compact:
                     all_days[ds] = compact
             if all_days:
+                self._remember_compact("nutrition", dict(sorted(all_days.items())))
                 self.md.append("\nNutrition\n")
                 self.md.append(
                     'Schema: "Solo fechas con alimentos registrados. Se omiten '
@@ -3846,7 +5464,7 @@ class GarminExporter:
         else:
             has_data = False
             for ds in days_list:
-                day_data = cached_results.get(ds) or fetched_results.get(ds)
+                day_data = fetched_results.get(ds) or cached_results.get(ds)
                 if day_data and any(day_data.get(k) for k in ("food_log", "meals", "settings")):
                     has_data = True
                     self.md.append(f"{ds}\n")
@@ -3899,6 +5517,7 @@ class GarminExporter:
         if cached is not None and not self.update_mode:
             data = cached
         else:
+            failures_before_cache = self._endpoint_failure_count()
             data = {}
             data["pregnancy"] = safe_call(self.api.get_pregnancy_summary, label="pregnancy")
 
@@ -3914,7 +5533,14 @@ class GarminExporter:
                     self.start_date, self.today, "menstrual_cal")
             else:
                 data["menstrual_calendar"] = None
-            self.cache.put_section(cache_key, data)
+            self.cache.put_section(
+                cache_key,
+                data,
+                complete=(
+                    self._endpoint_failure_count()
+                    == failures_before_cache
+                ),
+            )
 
         if not any(data.get(k) for k in ("pregnancy", "menstrual_calendar")):
             _section_nodata(self.md, "Women's Health")
@@ -3981,8 +5607,105 @@ Inicio de sesión:
                         help="Final inclusivo del periodo (AAAA-MM-DD); requiere --start-date")
     parser.add_argument("--output", type=str, default="export", help="Carpeta de salida (predeterminada: export)")
     parser.add_argument("--filename", type=str, default=None,
-                        help="Nombre del archivo TXT dentro de --output")
+                        help="Nombre base del archivo dentro de --output")
     parser.add_argument("--tokenstore", type=str, default=None, help="Ruta donde se guardan los tokens")
+    parser.add_argument(
+        "--force-login",
+        action="store_true",
+        help="Ignorar la sesión existente y solicitar de nuevo las credenciales",
+    )
+    parser.add_argument(
+        "--ignore-credential-env",
+        action="store_true",
+        help=(
+            "No leer credenciales de .env ni de variables de entorno; "
+            "recomendado para perfiles separados"
+        ),
+    )
+    parser.add_argument(
+        "--non-interactive-auth",
+        action="store_true",
+        help=(
+            "Utilizar solo los tokens guardados y fallar si la sesión necesita "
+            "renovarse"
+        ),
+    )
+    parser.add_argument(
+        "--cache-dir",
+        type=str,
+        default=None,
+        help="Carpeta privada de caché; permite aislarla por perfil",
+    )
+    parser.add_argument(
+        "--report",
+        choices=("preparation", "activity", "history"),
+        default="history",
+        help="Tipo de informe: preparación, una actividad o histórico",
+    )
+    parser.add_argument(
+        "--race-review",
+        action="store_true",
+        help="Alias de --report preparation; crea una fotografía autosuficiente",
+    )
+    parser.add_argument(
+        "--race-context",
+        type=str,
+        default=None,
+        help="JSON local con carrera, objetivo y disponibilidad",
+    )
+    parser.add_argument(
+        "--journal",
+        type=str,
+        default=None,
+        help="JSON local con anotaciones opcionales",
+    )
+    parser.add_argument(
+        "--review-weeks",
+        type=int,
+        default=None,
+        help="Semanas de la revisión de preparación (4 a 52)",
+    )
+    parser.add_argument(
+        "--format",
+        choices=("txt", "xlsx", "both"),
+        default="txt",
+        help="Formato de salida: txt, xlsx o ambos",
+    )
+    parser.add_argument(
+        "--xlsx",
+        action="store_true",
+        help="Añadir XLSX además del TXT (alias de --format both)",
+    )
+    parser.add_argument(
+        "--include-free-text",
+        action="store_true",
+        help="Incluir títulos y textos libres mediante consentimiento explícito",
+    )
+    parser.add_argument(
+        "--activity-id",
+        type=str,
+        default=None,
+        help="Referencia privada de la única actividad que se analizará",
+    )
+    parser.add_argument(
+        "--list-activities",
+        type=str,
+        default=None,
+        metavar="RUTA_JSON",
+        help="Guardar un catálogo privado de actividades y salir",
+    )
+    parser.add_argument(
+        "--manifest",
+        type=str,
+        default=None,
+        help="Guardar un manifiesto JSON del resultado para el lanzador",
+    )
+    parser.add_argument(
+        "--run-id",
+        type=str,
+        default=None,
+        help="Identificador local de ejecución que se copiará al manifiesto",
+    )
     parser.add_argument(
         "--timezone",
         type=str,
@@ -4000,37 +5723,123 @@ Inicio de sesión:
     parser.add_argument("--update", action="store_true",
                         help="Exportar solo los datos nuevos desde la última exportación. Activa --compact")
     parser.add_argument("--login", action="store_true", help="Iniciar sesión, guardar tokens y salir")
+    parser.add_argument(
+        "--check-session",
+        action="store_true",
+        help="Comprobar los tokens guardados sin pedir credenciales y salir",
+    )
     parser.add_argument("--verbose", action="store_true", help="Mostrar información técnica detallada")
 
     args = parser.parse_args()
 
+    if args.days < 1:
+        parser.error("--days debe ser al menos 1")
+    if args.activities < 1:
+        parser.error("--activities debe ser al menos 1")
+    if args.review_weeks is not None and not 4 <= args.review_weeks <= 52:
+        parser.error("--review-weeks debe estar entre 4 y 52")
+    if args.login and args.check_session:
+        parser.error("--login no se puede combinar con --check-session")
+    if args.login and args.non_interactive_auth:
+        parser.error("--login no se puede combinar con --non-interactive-auth")
+    if args.force_login and not args.login:
+        parser.error("--force-login requiere --login")
+    if args.run_id and not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", args.run_id):
+        parser.error("--run-id contiene caracteres no permitidos")
+    if args.activity_id and not re.fullmatch(
+        r"activity_[0-9a-f]{12}",
+        args.activity_id.strip(),
+    ):
+        parser.error(
+            "--activity-id solo admite la referencia privada creada por el programa, "
+            "con formato activity_ seguido de 12 caracteres hexadecimales"
+        )
+    if args.check_session:
+        args.ignore_credential_env = True
+        args.non_interactive_auth = True
+
+    report_type = "preparation" if args.race_review else args.report
+    if report_type in {"preparation", "activity"}:
+        args.compact = True
+    if report_type == "activity":
+        if not args.activity_id:
+            parser.error("--report activity requiere --activity-id")
+        args.activity_details = True
+    if report_type == "preparation" and (args.all or args.update):
+        parser.error("la revisión de preparación no se combina con --all ni --update")
+
+    output_format = "both" if args.xlsx else args.format
+    if output_format in {"xlsx", "both"}:
+        args.compact = True
+    if args.split and output_format == "xlsx":
+        parser.error("--split requiere que la salida incluya TXT")
+
     explicit_start_date = None
     explicit_end_date = None
-    if args.start_date:
-        try:
-            explicit_start_date = date.fromisoformat(args.start_date)
-        except ValueError:
-            parser.error("--start-date debe utilizar el formato AAAA-MM-DD")
-        if explicit_start_date > date.today():
-            parser.error("--start-date no puede ser una fecha futura")
-        if args.all or args.update:
-            parser.error("--start-date no se puede combinar con --all ni --update")
+    reference_today = date.today()
     if args.end_date:
         try:
             explicit_end_date = date.fromisoformat(args.end_date)
         except ValueError:
             parser.error("--end-date debe utilizar el formato AAAA-MM-DD")
-        if explicit_start_date is None:
-            parser.error("--end-date requiere --start-date")
-        if explicit_end_date > date.today():
+        if explicit_end_date > reference_today:
             parser.error("--end-date no puede ser una fecha futura")
-        if explicit_end_date < explicit_start_date:
+    if args.start_date:
+        try:
+            explicit_start_date = date.fromisoformat(args.start_date)
+        except ValueError:
+            parser.error("--start-date debe utilizar el formato AAAA-MM-DD")
+        if explicit_start_date > reference_today:
+            parser.error("--start-date no puede ser una fecha futura")
+        if args.all or args.update:
+            parser.error("--start-date no se puede combinar con --all ni --update")
+    if explicit_end_date is not None:
+        if (
+            explicit_start_date is None
+            and report_type != "preparation"
+            and not args.list_activities
+        ):
+            parser.error("--end-date requiere --start-date")
+        if (
+            explicit_start_date is not None
+            and explicit_end_date < explicit_start_date
+        ):
             parser.error("--end-date no puede ser anterior a --start-date")
+
+    context_reference_date = explicit_end_date or reference_today
+    try:
+        race_context_raw = load_local_json(
+            Path(args.race_context) if args.race_context else None,
+            "contexto de carrera",
+        )
+        race_context, default_review_weeks = normalise_race_context(
+            race_context_raw,
+            context_reference_date,
+            include_free_text=args.include_free_text,
+        )
+        journal_raw = load_local_json(
+            Path(args.journal) if args.journal else None,
+            "diario",
+        )
+        journal = normalise_journal(
+            journal_raw,
+            include_free_text=args.include_free_text,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    review_weeks = args.review_weeks or default_review_weeks
+    if report_type == "preparation" and explicit_start_date is None:
+        explicit_end_date = explicit_end_date or reference_today
+        explicit_start_date = _inclusive_review_start(
+            explicit_end_date,
+            review_weeks,
+        )
 
     output_filename = None
     if args.filename:
         try:
-            output_filename = _normalise_output_filename(args.filename)
+            output_filename = _normalise_output_stem(args.filename)
         except ValueError as exc:
             parser.error(f"--filename: {exc}")
 
@@ -4051,14 +5860,24 @@ Inicio de sesión:
     _compact_mode = args.compact
 
     print()
-    print("  Exportador de datos de Garmin Connect")
+    print("  EntrenaIA — Exportador de Garmin para IA")
     print(f"  {'-' * 38}")
     print()
 
-    tokenstore = args.tokenstore or os.getenv("GARMINTOKENS", "~/.garminconnect")
+    if args.tokenstore:
+        tokenstore = args.tokenstore
+    elif args.ignore_credential_env:
+        tokenstore = "~/.garminconnect"
+    else:
+        tokenstore = os.getenv("GARMINTOKENS", "~/.garminconnect")
 
     try:
-        api = authenticate(tokenstore)
+        api = authenticate(
+            tokenstore,
+            use_credential_environment=not args.ignore_credential_env,
+            interactive=not args.non_interactive_auth,
+            force_login=args.force_login,
+        )
     except GarminConnectTooManyRequestsError:
         log.error("Demasiadas solicitudes. Espera unos minutos y vuelve a intentarlo.")
         sys.exit(1)
@@ -4066,23 +5885,63 @@ Inicio de sesión:
         raise
     except Exception as e:
         log.error(f"El inicio de sesión ha fallado: {_friendly_login_error(e)}")
-        log.debug(f"Error completo: {e}")
+        log.debug(f"Tipo de fallo de acceso: {_safe_exception_reason(e)}")
         sys.exit(1)
 
     if args.login:
         print()
         log.info("Inicio de sesión correcto: los tokens están guardados. Ya puedes realizar exportaciones.")
         sys.exit(0)
+    if args.check_session:
+        print()
+        log.info("Sesión comprobada correctamente.")
+        sys.exit(0)
 
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=True)
 
     use_cache = not getattr(args, 'no_cache', False)
-    cache = ExportCache(out, enabled=use_cache)
+    cache = ExportCache(
+        out,
+        enabled=use_cache,
+        cache_dir=Path(args.cache_dir) if args.cache_dir else None,
+    )
     if use_cache:
         log.info("Caché: activada (permite continuar exportaciones interrumpidas)")
     else:
         log.info("Caché: desactivada (--no-cache)")
+
+    if args.list_activities:
+        catalog_end = explicit_end_date or reference_today
+        catalog_start = (
+            explicit_start_date
+            or catalog_end - timedelta(days=max(args.days - 1, 0))
+        )
+        activities = safe_call(
+            api.get_activities_by_date,
+            catalog_start.isoformat(),
+            catalog_end.isoformat(),
+            None,
+            label="activity_catalog",
+        ) or []
+        secret = load_or_create_reference_secret(cache.cache_dir)
+        catalog = [
+            activity_catalog_entry(activity, secret)
+            for activity in activities
+            if isinstance(activity, dict)
+        ]
+        catalog.sort(key=lambda item: item.get("date", ""), reverse=True)
+        atomic_write_json(
+            Path(args.list_activities),
+            {
+                "schema_version": _COMPACT_SCHEMA_VERSION,
+                "start_date": catalog_start.isoformat(),
+                "end_date": catalog_end.isoformat(),
+                "activities": catalog,
+            },
+        )
+        log.info(f"Catálogo privado creado: {len(catalog)} actividades")
+        sys.exit(0)
 
     exporter = GarminExporter(api, out, args.days, args.activities,
                               fetch_all=getattr(args, 'all', False),
@@ -4092,7 +5951,20 @@ Inicio de sesión:
                               explicit_end_date=explicit_end_date,
                               output_filename=output_filename,
                               include_activity_details=args.activity_details,
-                              timezone_name=timezone_name)
+                              timezone_name=timezone_name,
+                              output_format=output_format,
+                              report_type=report_type,
+                              race_context=race_context,
+                              journal=journal,
+                              review_weeks=review_weeks,
+                              selected_activity_ref=args.activity_id,
+                              include_free_text=args.include_free_text,
+                              manifest_path=(
+                                  Path(args.manifest)
+                                  if args.manifest
+                                  else None
+                              ),
+                              run_id=args.run_id)
     try:
         exporter.run()
     except KeyboardInterrupt:

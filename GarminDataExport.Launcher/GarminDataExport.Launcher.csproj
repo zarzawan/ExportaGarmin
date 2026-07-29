@@ -8,12 +8,12 @@
     <Nullable>enable</Nullable>
     <RootNamespace>GarminDataExport.Launcher</RootNamespace>
     <AssemblyName>GarminLauncher</AssemblyName>
-    <Version>1.2.0</Version>
-    <AssemblyVersion>1.2.0.0</AssemblyVersion>
-    <FileVersion>1.2.0.0</FileVersion>
-    <Product>Exportador de datos de Garmin</Product>
-    <AssemblyTitle>Exportador de datos de Garmin</AssemblyTitle>
-    <Description>Lanzador gráfico en castellano para exportaciones de Garmin Connect preparadas para IA.</Description>
+    <Version>3.1.0</Version>
+    <AssemblyVersion>3.1.0.0</AssemblyVersion>
+    <FileVersion>3.1.0.0</FileVersion>
+    <Product>EntrenaIA — Exportador de Garmin para IA</Product>
+    <AssemblyTitle>EntrenaIA</AssemblyTitle>
+    <Description>Exportador no oficial y no afiliado a Garmin para preparar datos de Garmin Connect para una IA.</Description>
     <Authors>zarzawan</Authors>
     <NeutralLanguage>es-ES</NeutralLanguage>
   </PropertyGroup>

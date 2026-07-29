@@ -1,45 +1,69 @@
-EXPORTADOR DE DATOS DE GARMIN
-==============================
+ENTRENAIA — EXPORTADOR DE GARMIN PARA IA
+=========================================
 
-INSTALACIÓN
+INSTALAR
 
-1. Asegúrate de haber extraído por completo el archivo ZIP.
+1. Extrae por completo el ZIP que has descargado.
 2. Haz doble clic en Instalar.bat.
 3. No cierres la ventana negra mientras trabaja.
-4. Si lo solicita, inicia sesión con tu propia cuenta de Garmin.
-5. No compartas tu contraseña, código MFA ni tokens con nadie.
-6. Cuando termine, haz doble clic en GarminLauncher.exe.
+4. Cuando termine, abre GarminLauncher.exe.
 
-USO
+PRIMERA VEZ
 
-1. Elige las fechas inicial y final. Ambas se descargarán.
-2. Revisa el nombre propuesto. Puedes cambiarlo.
-3. Para el uso normal, deja desmarcado el detalle temporal.
-4. Pulsa "Crear exportación".
-5. Espera hasta que aparezca "Exportación completada".
-6. Pulsa "Abrir archivo" para ver el resultado.
+1. Sigue el asistente "Primeros pasos".
+2. Elige tu perfil.
+3. Pulsa "Iniciar sesión en Garmin".
+4. Escribe usuario, contraseña y MFA solo en la ventana negra.
+5. Pulsa "Comprobar de nuevo".
+6. Configura "Mi carrera" si conoces la distancia y la fecha.
 
-El archivo queda en "export\managed" con un nombre como:
+No escribas nunca credenciales, MFA, cookies o tokens en un chat.
 
-garmin_datos_2026-01-01_a_2026-07-28.txt
+USO SEMANAL RECOMENDADO
 
-La exportación incluye la presión arterial disponible en Garmin.
+1. Sincroniza antes el reloj con Garmin Connect.
+2. Abre "Revisión recomendada".
+3. Mantén "Texto con JSON (.txt)", que es el formato recomendado para IA.
+4. Pulsa "Crear archivo para la IA".
+5. Pulsa "Abrir archivo".
+6. Súbelo manualmente a la IA que prefieras.
+7. Pulsa "Copiar pregunta para la IA" y pégala en la conversación.
 
-El archivo normal está preparado para analizar el entrenamiento con una IA:
-conserva actividades, vueltas, zonas, sueño, VFC, autoevaluación y
-zapatillas o bicicletas, pero elimina nombres, coordenadas, números de serie,
-catálogos vacíos e información duplicada.
+El programa propone 16 semanas para maratón y 12 para media maratón. Al repetir
+la revisión sustituye el archivo anterior para no acumular cientos de copias.
 
-Si Garmin no tiene sueño, VFC, presión arterial, hidratación o nutrición para
-una fecha, el programa no inventa valores. La sección "Data Quality"
-(calidad de los datos) explica qué información falta.
+OTRAS OPCIONES
 
-La opción de máximo detalle conserva las muestras de cada actividad con la
-resolución registrada por el reloj. Úsala para periodos cortos porque aumenta
-mucho el tamaño del archivo.
+- "Analizar una actividad" añade el máximo detalle disponible de una sesión.
+- "Archivo histórico" permite elegir las fechas inicial y final.
+- "Mi diario" añade sensaciones o nutrición que el reloj no conoce.
+- "Guía sencilla" explica la rutina diaria, semanal, mensual y la privacidad.
+- Excel es opcional para revisar tablas. El TXT es más rápido y conserva todas
+  las series detalladas cuando el intervalo es grande.
+- Cada actividad incluye el nombre, fabricante y modelo del equipo asociado
+  en Garmin, pero nunca su identificador real.
 
-Si algo falla, cierra GarminLauncher.exe y ejecuta Instalar.bat otra vez.
+PRIVACIDAD
+
+El archivo para IA intenta retirar identidad, coordenadas, títulos e
+identificadores reales. La caché y la sesión sí son privadas y nunca deben
+subirse a Git.
+
+Los nombres personalizados de zapatillas o bicicletas sí aparecen para ayudar
+al análisis. Revísalos si has escrito información personal dentro de ellos.
+
+Los resultados quedan en:
+
+Documentos\Garmin para IA\NOMBRE_DEL_PERFIL
+
+Si Documentos está sincronizado con OneDrive, Windows también puede sincronizar
+los archivos. Revisa esa configuración si quieres conservarlos solo en el PC.
+
+Si aparece "exportación parcial", consulta "Detalles técnicos" y repite más
+tarde si los datos que faltan son importantes.
+
 La guía completa está en README.md.
 
-Este programa es gratuito, no oficial y está basado en el proyecto
-sirredbeard/garmin-data-export. Utilízalo únicamente con tu propia cuenta.
+EntrenaIA es gratuito y no oficial. No pertenece a Garmin, no está afiliado a
+Garmin ni cuenta con su respaldo. Está basado en
+sirredbeard/garmin-data-export.

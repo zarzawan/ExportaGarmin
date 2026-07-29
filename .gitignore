@@ -18,6 +18,7 @@ build/
 # === Entornos virtuales ===
 venv/
 .venv/
+.venv.incompatible-*/
 env/
 .env/
 ENV/
