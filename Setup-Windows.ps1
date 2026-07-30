@@ -77,15 +77,16 @@ function Require-Winget {
 }
 
 Write-Host ''
-Write-Host 'EntrenaIA - Exportador de Garmin para IA - Instalación' -ForegroundColor Cyan
+Write-Host 'EntrenaIA - Preparación desde el código fuente' -ForegroundColor Cyan
 Write-Host '=========================================================' -ForegroundColor Cyan
 Write-Host ''
 Write-Host 'No cierres esta ventana. Se comprobarán todos los requisitos.' -ForegroundColor Gray
+Write-Host 'La descarga normal de GitHub Releases no necesita este proceso.' -ForegroundColor Gray
 Write-Host ''
 
-$runningLauncher = Get-Process GarminLauncher -ErrorAction SilentlyContinue
+$runningLauncher = Get-Process -Name EntrenaIA, GarminLauncher -ErrorAction SilentlyContinue
 if ($runningLauncher) {
-    throw 'GarminLauncher.exe está abierto. Cierra su ventana y ejecuta de nuevo Instalar.bat.'
+    throw 'EntrenaIA está abierto. Cierra su ventana y ejecuta de nuevo Instalar.bat.'
 }
 
 $pythonExe = Find-Python311
@@ -110,43 +111,18 @@ if (-not $pythonExe) {
 Write-Host "Python encontrado: $pythonExe" -ForegroundColor Green
 
 $dotnetExe = Find-DotNet
-$hasDotNet11 = $false
+$hasDotNet10 = $false
 if ($dotnetExe) {
     $installedSdks = & $dotnetExe --list-sdks
-    $hasDotNet11 = [bool]($installedSdks -match '^11\.')
+    $hasDotNet10 = [bool]($installedSdks -match '^10\.')
 }
 
-if (-not $hasDotNet11) {
+if (-not $hasDotNet10) {
     Require-Winget
-    Write-Host 'Instalando el SDK de .NET 11...' -ForegroundColor Yellow
-
-    winget show `
-        --id Microsoft.DotNet.SDK.11 `
-        --exact `
-        --source winget `
-        --accept-source-agreements *> $null
-    if ($LASTEXITCODE -eq 0) {
-        $dotnetPackage = 'Microsoft.DotNet.SDK.11'
-    } else {
-        # Microsoft publica la versión preliminar vigente bajo este ID
-        # genérico. La comprobación posterior impide aceptar otra versión.
-        winget show `
-            --id Microsoft.DotNet.SDK.Preview `
-            --exact `
-            --source winget `
-            --accept-source-agreements *> $null
-        if ($LASTEXITCODE -ne 0) {
-            throw (
-                'winget no ofrece todavía el SDK 11. Instálalo desde ' +
-                'https://dotnet.microsoft.com/download/dotnet/11.0 ' +
-                'y ejecuta de nuevo Instalar.bat.'
-            )
-        }
-        $dotnetPackage = 'Microsoft.DotNet.SDK.Preview'
-    }
+    Write-Host 'Instalando el SDK estable de .NET 10 LTS...' -ForegroundColor Yellow
 
     winget install `
-        --id $dotnetPackage `
+        --id Microsoft.DotNet.SDK.10 `
         --exact `
         --source winget `
         --accept-source-agreements `
@@ -161,8 +137,8 @@ if (-not $hasDotNet11) {
     }
 }
 $installedSdks = & $dotnetExe --list-sdks
-if ($LASTEXITCODE -ne 0 -or -not [bool]($installedSdks -match '^11\.')) {
-    throw 'El SDK de .NET 11 todavía no está disponible. Reinicia el PC y ejecuta de nuevo Instalar.bat.'
+if ($LASTEXITCODE -ne 0 -or -not [bool]($installedSdks -match '^10\.')) {
+    throw 'El SDK de .NET 10 todavía no está disponible. Reinicia el PC y ejecuta de nuevo Instalar.bat.'
 }
 Write-Host ".NET encontrado: $dotnetExe" -ForegroundColor Green
 
@@ -217,30 +193,28 @@ Write-Host 'Compilando la aplicación .NET...' -ForegroundColor Yellow
 if ($LASTEXITCODE -ne 0) {
     throw "No se pudieron restaurar las dependencias de .NET. Código de error: $LASTEXITCODE."
 }
-# La versión preliminar de .NET 11 puede terminar con código 1 y sin errores
-# al compilar esta solución en paralelo. La compilación secuencial es estable.
 & $dotnetExe build (Join-Path $projectRoot 'GarminDataExport.slnx') --no-restore -m:1
 if ($LASTEXITCODE -ne 0) {
     throw "La compilación de .NET ha fallado. Código de error: $LASTEXITCODE."
 }
 
 $publishDirectory = Join-Path $projectRoot 'GarminDataExport.Launcher\bin\publish'
-Write-Host 'Creando GarminLauncher.exe...' -ForegroundColor Yellow
+Write-Host 'Creando EntrenaIA.exe...' -ForegroundColor Yellow
 & $dotnetExe publish `
     (Join-Path $projectRoot 'GarminDataExport.Launcher\GarminDataExport.Launcher.csproj') `
     -c Release `
     -r win-x64 `
-    --self-contained false `
+    --self-contained true `
     -p:PublishSingleFile=true `
     -p:DebugType=None `
     -p:DebugSymbols=false `
     -o $publishDirectory
 if ($LASTEXITCODE -ne 0) {
-    throw "No se pudo crear GarminLauncher.exe. Código de error: $LASTEXITCODE."
+    throw "No se pudo crear EntrenaIA.exe. Código de error: $LASTEXITCODE."
 }
 
-$publishedExe = Join-Path $publishDirectory 'GarminLauncher.exe'
-$rootExe = Join-Path $projectRoot 'GarminLauncher.exe'
+$publishedExe = Join-Path $publishDirectory 'EntrenaIA.exe'
+$rootExe = Join-Path $projectRoot 'EntrenaIA.exe'
 Copy-Item -LiteralPath $publishedExe -Destination $rootExe -Force
 
 Write-Host ''
@@ -249,7 +223,7 @@ Write-Host "Lanzador: $rootExe"
 Write-Host ''
 Write-Host 'Siguiente paso:' -ForegroundColor Cyan
 Write-Host '1. Cierra esta ventana.'
-Write-Host '2. Haz doble clic en GarminLauncher.exe.'
+Write-Host '2. Haz doble clic en EntrenaIA.exe.'
 Write-Host '3. Sigue el asistente Primeros pasos para elegir perfil e iniciar sesión.'
 Write-Host ''
 Write-Host 'Escribe tus credenciales y el MFA únicamente en la ventana de inicio de sesión.' -ForegroundColor Yellow

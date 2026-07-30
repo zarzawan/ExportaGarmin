@@ -1,17 +1,11 @@
 ﻿using System.Diagnostics;
 
-var scriptPath = Path.Combine(Directory.GetCurrentDirectory(), "garmin_export.py");
-if (!File.Exists(scriptPath))
-    scriptPath = Path.Combine(AppContext.BaseDirectory, "garmin_export.py");
-
-var localVenvPython = Path.Combine(
-    Directory.GetCurrentDirectory(),
-    ".venv",
-    "Scripts",
-    "python.exe");
-var pythonCommand = await IsPython311Async(localVenvPython)
-    ? localVenvPython
-    : await FindPythonAsync();
+var backend = FindBundledOrDevelopmentBackend();
+var scriptPath = backend?.ScriptPath ??
+                 Path.Combine(Directory.GetCurrentDirectory(), "garmin_export.py");
+var pythonCommand = backend?.PythonPath;
+if (pythonCommand is null)
+    pythonCommand = await FindPythonAsync();
 if (pythonCommand is null)
 {
     Console.Error.WriteLine("Python 3.11 no está instalado o no funciona.");
@@ -32,8 +26,15 @@ var psi = new ProcessStartInfo
 {
     FileName = pythonCommand,
     ArgumentList = { scriptPath },
+    WorkingDirectory = backend?.ApplicationRoot ??
+                       Directory.GetCurrentDirectory(),
     UseShellExecute = false
 };
+psi.Environment["PYTHONDONTWRITEBYTECODE"] = "1";
+psi.Environment["PYTHONNOUSERSITE"] = "1";
+psi.Environment["PYTHONUTF8"] = "1";
+psi.Environment.Remove("PYTHONHOME");
+psi.Environment.Remove("PYTHONPATH");
 
 foreach (var arg in args)
     psi.ArgumentList.Add(arg);
@@ -47,6 +48,48 @@ if (process is null)
 
 await process.WaitForExitAsync();
 Environment.Exit(process.ExitCode);
+
+static BackendLocation? FindBundledOrDevelopmentBackend()
+{
+    foreach (var startingDirectory in new[]
+             {
+                 AppContext.BaseDirectory,
+                 Environment.CurrentDirectory,
+             }.Distinct(StringComparer.OrdinalIgnoreCase))
+    {
+        var directory = new DirectoryInfo(startingDirectory);
+        for (var level = 0;
+             directory is not null && level < 8;
+             level++, directory = directory.Parent)
+        {
+            var portable = new BackendLocation(
+                directory.FullName,
+                Path.Combine(
+                    directory.FullName,
+                    "runtime",
+                    "python",
+                    "python.exe"),
+                Path.Combine(
+                    directory.FullName,
+                    "app",
+                    "garmin_export.pyc"));
+            if (portable.Exists())
+                return portable;
+
+            var development = new BackendLocation(
+                directory.FullName,
+                Path.Combine(
+                    directory.FullName,
+                    ".venv",
+                    "Scripts",
+                    "python.exe"),
+                Path.Combine(directory.FullName, "garmin_export.py"));
+            if (development.Exists())
+                return development;
+        }
+    }
+    return null;
+}
 
 static async Task<string?> FindPythonAsync()
 {
@@ -194,4 +237,13 @@ static void RefreshPath()
     var userPath = Environment.GetEnvironmentVariable("PATH", EnvironmentVariableTarget.User) ?? "";
     var combined = $"{userPath};{machinePath}";
     Environment.SetEnvironmentVariable("PATH", combined);
+}
+
+internal sealed record BackendLocation(
+    string ApplicationRoot,
+    string PythonPath,
+    string ScriptPath)
+{
+    public bool Exists() =>
+        File.Exists(PythonPath) && File.Exists(ScriptPath);
 }

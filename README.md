@@ -27,36 +27,45 @@ Necesitas Windows 11, conexión a Internet y una cuenta de Garmin Connect.
 
 ### 1. Descargar
 
-1. Pulsa el botón verde **Code** de GitHub.
-2. Pulsa **Download ZIP**.
-3. Abre la carpeta **Descargas**.
-4. Pulsa con el botón derecho sobre el ZIP y elige **Extraer todo**.
-5. Entra en la carpeta extraída.
+1. Abre la página
+   [Última versión de EntrenaIA](https://github.com/zarzawan/entrenaia-garmin/releases/latest).
+2. En **Assets**, descarga `EntrenaIA-3.2.0-Windows-x64.zip`.
+3. No descargues **Source code**: esos enlaces son para programadores.
+4. Abre la carpeta **Descargas**.
+5. Pulsa con el botón derecho sobre el ZIP y elige **Extraer todo**.
+6. Entra en la carpeta extraída.
 
-No ejecutes el instalador desde dentro del ZIP.
+### 2. Preparar
 
-### 2. Instalar
+No tienes que instalar Python, .NET, Visual Studio ni ningún SDK. La descarga
+ya contiene la aplicación compilada, .NET 10 LTS, Python 3.11 y las
+dependencias comprobadas.
 
-1. Haz doble clic en `Instalar.bat`.
-2. Mantén abierta la ventana negra mientras trabaja.
-3. Acepta las ventanas de Windows si necesita instalar Python o .NET.
-4. Espera hasta que indique que la instalación ha terminado.
+El código fuente propio se distribuye por separado en el repositorio. La
+descarga normal incluye `CODIGO_FUENTE.txt` con el enlace, la versión y el
+commit de referencia.
 
-El instalador comprueba e instala únicamente lo necesario:
+No ejecutes `EntrenaIA.exe` desde dentro del ZIP: extráelo primero por
+completo. La carpeta `app` y la carpeta `runtime` deben permanecer junto al
+ejecutable.
 
-- Python 3.11;
-- SDK de .NET 11;
-- entorno privado `.venv`;
-- dependencias comprobadas;
-- aplicación gráfica `GarminLauncher.exe`.
+Si Windows protege la ejecución, comprueba que descargaste el archivo desde
+la Release oficial y utiliza **Más información > Ejecutar de todas formas**.
+EntrenaIA todavía no tiene firma comercial de código.
 
-La primera instalación puede tardar varios minutos. Si Windows protege la
-ejecución, comprueba que descargaste los archivos de este repositorio y utiliza
-**Más información > Ejecutar de todas formas**.
+La Release incluye también un archivo `.sha256`. Si deseas comprobar la
+integridad de la descarga, abre PowerShell dentro de Descargas y ejecuta:
+
+```powershell
+Get-FileHash .\EntrenaIA-3.2.0-Windows-x64.zip -Algorithm SHA256
+```
+
+El resultado debe coincidir con el contenido de
+`EntrenaIA-3.2.0-Windows-x64.zip.sha256`.
 
 ### 3. Abrir por primera vez
 
-1. Haz doble clic en `GarminLauncher.exe`.
+1. Haz doble clic en `EntrenaIA.exe`.
 2. Sigue el asistente **Primeros pasos**.
 3. Elige un nombre sencillo para tu perfil.
 4. Pulsa **Iniciar sesión en Garmin**.
@@ -358,20 +367,23 @@ lo más seguro es crear una cuenta distinta de Windows para cada una.
 | Sesión, caché, carrera y diario | `%LOCALAPPDATA%\GarminDataExportLauncher\profiles\` |
 | Preferencias y lista de perfiles | `%LOCALAPPDATA%\GarminDataExportLauncher\` |
 | Sesión antigua compatible | `%USERPROFILE%\.garminconnect\` |
-| Entorno Python | `.venv\` dentro del proyecto |
+| Python incluido en la descarga | `runtime\python\` junto a `EntrenaIA.exe` |
 
 Todo ello queda fuera del repositorio o está cubierto por `.gitignore`.
 
 ## Reparar o actualizar
 
-1. Cierra `GarminLauncher.exe`.
-2. Ejecuta otra vez `Instalar.bat`.
-3. Espera a que vuelva a compilar.
+1. Cierra `EntrenaIA.exe`.
+2. Descarga el ZIP de la nueva versión desde GitHub Releases.
+3. Extráelo por completo en una carpeta nueva.
+4. Abre el nuevo `EntrenaIA.exe`.
 
-El instalador no borra perfiles, caché, sesiones ni exportaciones.
-Si encuentra una `.venv` dañada o creada con otra versión de Python, la
-conserva con un nombre que empieza por `.venv.incompatible-` y crea un entorno
-nuevo con Python 3.11.
+Los perfiles, sesiones, caché, carreras, diarios y exportaciones se guardan
+fuera de la carpeta del programa. Actualizar o sustituir esa carpeta no los
+borra.
+
+`Instalar.bat` se conserva únicamente para desarrolladores que trabajen con
+el código fuente. Los usuarios de la versión descargable no deben ejecutarlo.
 
 ## Problemas frecuentes
 
@@ -439,11 +451,25 @@ datos privados. No es el recomendado para subir a una IA.
 
 ## Desarrollo y comprobaciones
 
+Para trabajar con el código fuente se necesitan Python 3.11 y el SDK de
+.NET 10 LTS. `Instalar.bat` prepara ese entorno técnico y compila
+`EntrenaIA.exe`; no forma parte de la instalación normal de una Release.
+
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 dotnet restore GarminDataExport.slnx
 dotnet build GarminDataExport.slnx --no-restore
 ```
+
+Crear localmente la misma descarga portable que publica GitHub:
+
+```powershell
+.\scripts\Build-PortableRelease.ps1 -Version 3.2.0
+```
+
+El resultado queda en `artifacts\` e incluye el ZIP y su SHA-256. GitHub
+Actions ejecuta las pruebas y genera estos archivos automáticamente al
+publicar una etiqueta de versión.
 
 Dependencias principales:
 
@@ -451,7 +477,7 @@ Dependencias principales:
 - `tzdata` para zonas horarias IANA en Windows;
 - `openpyxl` para crear XLSX sin macros;
 - Python 3.11;
-- .NET 11.
+- .NET 10 LTS.
 
 Garmin no ofrece una API personal oficial. Sus endpoints pueden cambiar y sus
 límites de llamadas no están documentados.

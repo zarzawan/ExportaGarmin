@@ -49,13 +49,8 @@ internal static class SessionLoginLauncher
         Process? process = null;
         try
         {
-            var pythonPath = Path.Combine(
-                projectRoot,
-                ".venv",
-                "Scripts",
-                "python.exe");
-            var scriptPath = Path.Combine(projectRoot, "garmin_export.py");
-            if (!File.Exists(pythonPath) || !File.Exists(scriptPath))
+            var backend = BackendPaths.TryResolve(projectRoot);
+            if (backend is null)
                 throw new FileNotFoundException(
                     "No se encontró la instalación de Python del programa.");
 
@@ -80,7 +75,12 @@ internal static class SessionLoginLauncher
                 "set \"EMAIL=\"",
                 "set \"PASSWORD=\"",
                 "set \"GARMINTOKENS=\"",
-                $"{Quote(pythonPath)} {Quote(scriptPath)} --login --force-login --ignore-credential-env --tokenstore {Quote(tokenStore)}",
+                "set \"PYTHONHOME=\"",
+                "set \"PYTHONPATH=\"",
+                "set \"PYTHONDONTWRITEBYTECODE=1\"",
+                "set \"PYTHONNOUSERSITE=1\"",
+                "set \"PYTHONUTF8=1\"",
+                $"{Quote(backend.PythonPath)} {Quote(backend.ScriptPath)} --login --force-login --ignore-credential-env --tokenstore {Quote(tokenStore)}",
                 "set \"GARMIN_LOGIN_EXIT_CODE=%ERRORLEVEL%\"",
                 "echo.",
                 "if \"%GARMIN_LOGIN_EXIT_CODE%\"==\"0\" (echo Sesion preparada.) else (echo No se pudo iniciar la sesion. Revisa el mensaje anterior.)",
@@ -96,7 +96,7 @@ internal static class SessionLoginLauncher
             process = Process.Start(new ProcessStartInfo
             {
                 FileName = commandFile,
-                WorkingDirectory = projectRoot,
+                WorkingDirectory = backend.ApplicationRoot,
                 UseShellExecute = true,
             }) ?? throw new InvalidOperationException(
                 "Windows no pudo abrir la ventana de inicio de sesión.");

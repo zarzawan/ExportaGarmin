@@ -6,11 +6,15 @@ cd /d "%~dp0"
 
 echo.
 echo ============================================================
-echo   EntrenaIA - Exportador de Garmin para IA
+echo   EntrenaIA - Preparación desde el código fuente
 echo ============================================================
 echo.
-echo No cierres esta ventana. La primera instalación puede tardar
-echo varios minutos y Windows puede solicitar permisos.
+echo Esta herramienta es para desarrolladores que han descargado el
+echo código fuente. La versión normal de GitHub Releases ya está
+echo compilada y no necesita este instalador.
+echo.
+echo No cierres esta ventana. Puede tardar varios minutos y Windows
+echo puede solicitar permisos.
 echo.
 
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0Setup-Windows.ps1"
@@ -31,7 +35,7 @@ if not "%RESULTADO%"=="0" (
     echo.
     echo Ya puedes cerrar esta ventana y hacer doble clic en:
     echo.
-    echo   GarminLauncher.exe
+    echo   EntrenaIA.exe
 )
 
 echo.
