@@ -12,7 +12,7 @@ ABRIR
 No necesitas instalar nada más.
 
 Si descargaste el código fuente en vez de
-ExportaGarmin-3.3.0-Windows-x64.zip, vuelve a GitHub Releases y descarga el
+ExportaGarmin-3.3.1-Windows-x64.zip, vuelve a GitHub Releases y descarga el
 archivo correcto de la sección Assets.
 
 AVISO DE WINDOWS
@@ -46,6 +46,9 @@ USO SEMANAL RECOMENDADO
 5. Pulsa "Abrir archivo".
 6. Súbelo manualmente a la IA que prefieras.
 7. Pulsa "Copiar pregunta para la IA" y pégala en la conversación.
+
+"Detalles técnicos" aparece activado para que puedas ver el progreso. Puedes
+ocultarlo si no lo necesitas. No compartas ese registro sin revisarlo.
 
 El programa propone 16 semanas para maratón y 12 para media maratón. Al repetir
 la revisión sustituye el archivo anterior para no acumular cientos de copias.

@@ -80,6 +80,7 @@ internal static class SessionLoginLauncher
                 "set \"PYTHONDONTWRITEBYTECODE=1\"",
                 "set \"PYTHONNOUSERSITE=1\"",
                 "set \"PYTHONUTF8=1\"",
+                "set \"PYTHONIOENCODING=utf-8\"",
                 $"{Quote(backend.PythonPath)} {Quote(backend.ScriptPath)} --login --force-login --ignore-credential-env --tokenstore {Quote(tokenStore)}",
                 "set \"GARMIN_LOGIN_EXIT_CODE=%ERRORLEVEL%\"",
                 "echo.",

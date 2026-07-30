@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using GarminDataExport.Launcher.Services;
 
 namespace GarminDataExport.Launcher;
@@ -69,6 +70,8 @@ internal static class Program
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
             CreateNoWindow = true,
         };
         backend.ApplySafePythonEnvironment(startInfo.Environment);
@@ -81,7 +84,13 @@ internal static class Program
         var stderr = process.StandardError.ReadToEndAsync();
         process.WaitForExit();
         Task.WaitAll(stdout, stderr);
-        return process.ExitCode;
+        if (process.ExitCode != 0)
+            return process.ExitCode;
+        var output = stdout.GetAwaiter().GetResult();
+        return output.Contains("Días de datos diarios", StringComparison.Ordinal) &&
+               !output.Contains("DÃ", StringComparison.Ordinal)
+            ? 0
+            : 5;
     }
 
     private static void ShowProtectedStorageError(Exception error)

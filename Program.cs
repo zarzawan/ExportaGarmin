@@ -33,6 +33,7 @@ var psi = new ProcessStartInfo
 psi.Environment["PYTHONDONTWRITEBYTECODE"] = "1";
 psi.Environment["PYTHONNOUSERSITE"] = "1";
 psi.Environment["PYTHONUTF8"] = "1";
+psi.Environment["PYTHONIOENCODING"] = "utf-8";
 psi.Environment.Remove("PYTHONHOME");
 psi.Environment.Remove("PYTHONPATH");
 

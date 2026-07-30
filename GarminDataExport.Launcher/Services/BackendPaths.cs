@@ -67,6 +67,7 @@ internal sealed class BackendPaths
         environment["PYTHONDONTWRITEBYTECODE"] = "1";
         environment["PYTHONNOUSERSITE"] = "1";
         environment["PYTHONUTF8"] = "1";
+        environment["PYTHONIOENCODING"] = "utf-8";
         foreach (var variable in new[]
                  {
                      "GARMIN_EMAIL",

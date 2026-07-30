@@ -372,6 +372,11 @@ Los `.pyc` de la descarga se compilan con Python 3.11. El código fuente
 legible permanece separado y se obtiene desde el repositorio público indicado
 en `CODIGO_FUENTE.txt`.
 
+El registro técnico se muestra por defecto, incluida una migración única de
+preferencias anteriores. Todos los procesos redirigidos deben leer la salida
+de Python como UTF-8 para conservar correctamente el español. El usuario puede
+ocultar después el registro y su elección debe persistir.
+
 `scripts/Build-PortableRelease.ps1` descarga el runtime oficial fijado de
 Python, verifica su SHA-256, instala el lock dentro del paquete, publica .NET
 como `win-x64` autocontenido, ejecuta el diagnóstico y crea el ZIP y su
@@ -418,7 +423,7 @@ capturar una ventana asociada a un perfil real.
 dotnet restore GarminDataExport.slnx
 dotnet build GarminDataExport.slnx --no-restore
 dotnet run --project GarminDataExport.csproj -- --help
-.\scripts\Build-PortableRelease.ps1 -Version 3.3.0
+.\scripts\Build-PortableRelease.ps1 -Version 3.3.1
 ```
 
 También:

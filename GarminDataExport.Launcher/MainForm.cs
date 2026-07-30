@@ -1251,6 +1251,8 @@ internal sealed class MainForm : Form
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
             CreateNoWindow = true,
         };
         startInfo.Environment["PYTHONUNBUFFERED"] = "1";
@@ -1867,7 +1869,7 @@ internal sealed class MainForm : Form
         }
 
         _settings = storedSettings;
-        // Migración única: las instalaciones anteriores recomendaban Excel.
+        // Migraciones únicas para mejorar los valores iniciales de versiones anteriores.
         // Después de guardar la versión actual, las elecciones del usuario se respetan.
         if (!_settings.ApplyMigrations())
             return;
@@ -2020,6 +2022,13 @@ internal sealed class MainForm : Form
         _status.Text = _readmePreviewMode == "informe"
             ? "Elige las fechas y pulsa «Crear archivo para la IA»."
             : "Todo preparado. Pulsa «Crear archivo para la IA».";
+        _showLog.Checked = true;
+        _logBox.Text =
+            "12:00:00 [INFO] Sesión iniciada con los tokens guardados" +
+            Environment.NewLine +
+            "12:00:00 [INFO] Caché activada: continuando una exportación anterior" +
+            Environment.NewLine +
+            "12:00:01 [INFO] Exportando actividades y salud diaria…";
         RefreshOutputPreview();
     }
 
