@@ -37,24 +37,25 @@ Necesitas Windows 11, conexión a Internet y una cuenta de Garmin Connect.
 
 ### 2. Preparar
 
-No tienes que instalar Python, .NET, Visual Studio ni ningún SDK. La descarga
-ya contiene la aplicación compilada, .NET 10 LTS, Python 3.11 y las
-dependencias comprobadas.
+No necesitas instalar nada más. Asegúrate de haber extraído todo el ZIP,
+mantén su contenido junto en la misma carpeta y abre `EntrenaIA.exe` desde esa
+carpeta.
 
-El código fuente propio se distribuye por separado en el repositorio. La
-descarga normal incluye `CODIGO_FUENTE.txt` con el enlace, la versión y el
-commit de referencia.
+Es posible que Windows muestre un aviso la primera vez. EntrenaIA es gratuito:
+no gano ni pretendo ganar dinero con el programa. Para reducir este tipo de
+avisos tendría que comprar y renovar un certificado comercial, y ese gasto no
+forma parte del objetivo de este proyecto personal y gratuito.
 
-No ejecutes `EntrenaIA.exe` desde dentro del ZIP: extráelo primero por
-completo. La carpeta `app` y la carpeta `runtime` deben permanecer junto al
-ejecutable.
+Si lo descargaste desde la
+[versión oficial](https://github.com/zarzawan/entrenaia-garmin/releases/latest),
+pulsa **Más información > Ejecutar de todas formas**. No desactives el
+antivirus.
 
-Si Windows protege la ejecución, comprueba que descargaste el archivo desde
-la Release oficial y utiliza **Más información > Ejecutar de todas formas**.
-EntrenaIA todavía no tiene firma comercial de código.
+<details>
+<summary>Comprobación opcional para usuarios avanzados</summary>
 
-La Release incluye también un archivo `.sha256`. Si deseas comprobar la
-integridad de la descarga, abre PowerShell dentro de Descargas y ejecuta:
+La descarga incluye un archivo `.sha256`. Para comprobar su integridad, abre
+PowerShell dentro de Descargas y ejecuta:
 
 ```powershell
 Get-FileHash .\EntrenaIA-3.2.0-Windows-x64.zip -Algorithm SHA256
@@ -62,6 +63,8 @@ Get-FileHash .\EntrenaIA-3.2.0-Windows-x64.zip -Algorithm SHA256
 
 El resultado debe coincidir con el contenido de
 `EntrenaIA-3.2.0-Windows-x64.zip.sha256`.
+
+</details>
 
 ### 3. Abrir por primera vez
 

@@ -4,17 +4,25 @@ ENTRENAIA — EXPORTADOR DE GARMIN PARA IA
 ABRIR
 
 1. Extrae por completo el ZIP que has descargado.
-2. Conserva juntas las carpetas app y runtime.
+2. No muevas solo EntrenaIA.exe: conserva junto todo el contenido extraído.
 3. Haz doble clic en EntrenaIA.exe.
 
-No necesitas instalar Python, .NET, Visual Studio ni un SDK.
+No necesitas instalar nada más.
 
 Si descargaste el código fuente en vez de
 EntrenaIA-3.2.0-Windows-x64.zip, vuelve a GitHub Releases y descarga el
 archivo correcto de la sección Assets.
 
-El archivo CODIGO_FUENTE.txt indica dónde consultar el código correspondiente
-a esta versión.
+AVISO DE WINDOWS
+
+Es posible que Windows muestre un aviso la primera vez. EntrenaIA es gratuito:
+no gano ni pretendo ganar dinero con el programa. Para reducir este tipo de
+avisos tendría que comprar y renovar un certificado comercial, y ese gasto no
+forma parte del objetivo de este proyecto personal y gratuito.
+
+Si descargaste EntrenaIA desde la versión oficial, pulsa
+"Más información" y después "Ejecutar de todas formas". No desactives el
+antivirus.
 
 PRIMERA VEZ
 
