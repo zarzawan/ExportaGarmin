@@ -61,6 +61,7 @@ internal sealed class MainForm : Form
     private readonly CheckBox _historyActivityDetails = new();
     private readonly ComboBox _formatCombo = new();
     private readonly Label _formatNotice = new();
+    private readonly Label _privacyNotice = new();
     private readonly Label _outputPreview = new();
     private readonly Label _status = new();
     private readonly ProgressBar _progress = new();
@@ -92,7 +93,7 @@ internal sealed class MainForm : Form
         Text = "ExportaGarmin — Tus datos de Garmin, ordenados y preparados para la IA";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(920, 720);
-        Size = new Size(1030, 810);
+        Size = new Size(1030, 880);
         Font = new Font("Segoe UI", 10F);
 
         BuildInterface();
@@ -201,7 +202,7 @@ internal sealed class MainForm : Form
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         panel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
 
-        var titles = new Panel { Dock = DockStyle.Fill, Height = 70 };
+        var titles = new Panel { Dock = DockStyle.Fill, Height = 65 };
         titles.Controls.Add(new Label
         {
             AutoSize = true,
@@ -233,20 +234,25 @@ internal sealed class MainForm : Form
     {
         var outer = new TableLayoutPanel
         {
-            AutoSize = true,
+            AutoSize = false,
             Dock = DockStyle.Fill,
+            Height = 125,
             ColumnCount = 2,
+            RowCount = 2,
             BackColor = Color.FromArgb(243, 247, 250),
             Padding = new Padding(12, 9, 12, 9),
             Margin = new Padding(0, 0, 0, 10),
         };
         outer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         outer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        outer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        outer.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
         var profileLine = new FlowLayoutPanel
         {
             AutoSize = true,
-            Dock = DockStyle.Fill,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Top,
             WrapContents = true,
         };
         profileLine.Controls.Add(new Label
@@ -284,8 +290,9 @@ internal sealed class MainForm : Form
         var contextActions = new FlowLayoutPanel
         {
             AutoSize = true,
-            FlowDirection = FlowDirection.RightToLeft,
-            WrapContents = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            FlowDirection = FlowDirection.TopDown,
+            WrapContents = false,
         };
         var race = MakeButton("Mi carrera");
         race.Click += (_, _) => OpenRaceContext();
@@ -315,26 +322,35 @@ internal sealed class MainForm : Form
 
     private TabPage BuildReviewTab()
     {
-        var page = new TabPage("1. Revisión recomendada") { Padding = new Padding(20) };
+        var page = new TabPage("1. Revisión recomendada")
+        {
+            Padding = new Padding(20),
+            AutoScroll = true,
+        };
         var layout = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Top,
             ColumnCount = 1,
+            RowCount = 5,
         };
+        for (var row = 0; row < layout.RowCount; row++)
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.Controls.Add(new Label
         {
             Text = "Seguimiento semanal de tu preparación",
             AutoSize = true,
             Font = new Font("Segoe UI", 14F, FontStyle.Bold),
-            Margin = new Padding(0, 0, 0, 8),
+            Margin = new Padding(0, 0, 0, 5),
         });
         layout.Controls.Add(new Label
         {
-            Text = "Crea un único archivo autocontenido. Cada semana puedes sustituir el anterior en ChatGPT. " +
-                   "Incluye evolución semanal, calidad de datos y contexto de carrera.",
+            Text = "Crea un archivo para subir a ChatGPT y sustituir cada semana. " +
+                   "Incluye tu evolución, la calidad de los datos y la carrera.",
             AutoSize = true,
             MaximumSize = new Size(850, 0),
-            Margin = new Padding(0, 0, 0, 18),
+            Margin = new Padding(0, 0, 0, 8),
         });
         var weeksLine = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
         weeksLine.Controls.Add(new Label
@@ -363,14 +379,14 @@ internal sealed class MainForm : Form
         layout.Controls.Add(weeksLine);
         _reviewPeriod.AutoSize = true;
         _reviewPeriod.Font = new Font(Font, FontStyle.Bold);
-        _reviewPeriod.Margin = new Padding(0, 12, 0, 0);
+        _reviewPeriod.Margin = new Padding(0, 6, 0, 0);
         layout.Controls.Add(_reviewPeriod);
         layout.Controls.Add(new Label
         {
-            Text = "Consejo: sincroniza antes el reloj y completa en Garmin la autoevaluación de las sesiones recientes.",
+            Text = "Consejo: sincroniza el reloj y completa la autoevaluación en Garmin.",
             AutoSize = true,
             ForeColor = Color.FromArgb(45, 90, 110),
-            Margin = new Padding(0, 18, 0, 0),
+            Margin = new Padding(0, 8, 0, 0),
         });
         page.Controls.Add(layout);
         return page;
@@ -378,12 +394,21 @@ internal sealed class MainForm : Form
 
     private TabPage BuildActivityTab()
     {
-        var page = new TabPage("2. Analizar una actividad") { Padding = new Padding(20) };
+        var page = new TabPage("2. Analizar una actividad")
+        {
+            Padding = new Padding(20),
+            AutoScroll = true,
+        };
         var layout = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Top,
             ColumnCount = 1,
+            RowCount = 4,
         };
+        for (var row = 0; row < layout.RowCount; row++)
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.Controls.Add(new Label
         {
             Text = "Estudia una sesión con el máximo detalle",
@@ -393,8 +418,8 @@ internal sealed class MainForm : Form
         });
         layout.Controls.Add(new Label
         {
-            Text = "Elige una actividad reciente. Se conservará la máxima resolución temporal disponible " +
-                   "sin coordenadas. Garmin puede usar grabación inteligente, por lo que no siempre hay un punto por segundo.",
+            Text = "Elige una actividad reciente. Se conservará la máxima resolución temporal disponible. " +
+                   "El GPS depende del modo de privacidad. Garmin puede usar grabación inteligente, por lo que no siempre hay un punto por segundo.",
             AutoSize = true,
             MaximumSize = new Size(850, 0),
             Margin = new Padding(0, 0, 0, 18),
@@ -439,12 +464,21 @@ internal sealed class MainForm : Form
 
     private TabPage BuildHistoryTab()
     {
-        var page = new TabPage("3. Archivo histórico") { Padding = new Padding(20) };
+        var page = new TabPage("3. Archivo histórico")
+        {
+            Padding = new Padding(20),
+            AutoScroll = true,
+        };
         var layout = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Dock = DockStyle.Top,
             ColumnCount = 1,
+            RowCount = 4,
         };
+        for (var row = 0; row < layout.RowCount; row++)
+            layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.Controls.Add(new Label
         {
             Text = "Elige un intervalo concreto",
@@ -523,6 +557,26 @@ internal sealed class MainForm : Form
         _formatNotice.ForeColor = SystemColors.GrayText;
         _formatNotice.Margin = new Padding(10, 7, 0, 0);
         bar.Controls.Add(_formatNotice);
+        bar.SetFlowBreak(_formatNotice, true);
+        bar.Controls.Add(new Label
+        {
+            Text = "Privacidad automática:",
+            AutoSize = true,
+            Font = new Font(Font, FontStyle.Bold),
+            Margin = new Padding(0, 12, 8, 0),
+        });
+        bar.Controls.Add(new Label
+        {
+            Text = "Oculta identidad y conserva los datos deportivos",
+            AutoSize = true,
+            Margin = new Padding(0, 12, 0, 0),
+        });
+        _privacyNotice.AutoSize = true;
+        _privacyNotice.ForeColor = SystemColors.GrayText;
+        _privacyNotice.Margin = new Padding(10, 12, 0, 0);
+        _privacyNotice.Text =
+            "Conserva GPS exacto, que puede revelar dónde entrenas. Revisa el archivo antes de compartirlo.";
+        bar.Controls.Add(_privacyNotice);
         return bar;
     }
 
@@ -1113,6 +1167,7 @@ internal sealed class MainForm : Form
             AppendLog($"Tipo: {ModeDisplayName(mode)}");
             AppendLog($"Intervalo: {start:yyyy-MM-dd} a {end:yyyy-MM-dd}");
             AppendLog($"Formato: {format}");
+            AppendLog("Privacidad: identidad e identificadores personales ocultos automáticamente");
             AppendLog("Destino: carpeta del perfil dentro de Documentos.");
             AppendLog("Las credenciales no se incluyen en el archivo.");
 
@@ -1664,11 +1719,12 @@ internal sealed class MainForm : Form
     {
         var visible = _showLog.Checked;
         _logGroup.Visible = visible;
+        var workingHeight = Screen.FromControl(this).WorkingArea.Height;
         if (_logRowStyle is not null)
-            _logRowStyle.Height = visible ? 190 : 0;
+            _logRowStyle.Height = visible ? 120 : 0;
         _settings.ShowTechnicalLog = visible;
         if (visible && Height < 880)
-            Height = Math.Min(Screen.FromControl(this).WorkingArea.Height, 940);
+            Height = Math.Min(workingHeight, 880);
         SaveSettings();
     }
 

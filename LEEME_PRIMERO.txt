@@ -12,7 +12,7 @@ ABRIR
 No necesitas instalar nada más.
 
 Si descargaste el código fuente en vez de
-ExportaGarmin-3.3.1-Windows-x64.zip, vuelve a GitHub Releases y descarga el
+ExportaGarmin-3.4.0-Windows-x64.zip, vuelve a GitHub Releases y descarga el
 archivo correcto de la sección Assets.
 
 AVISO DE WINDOWS
@@ -66,8 +66,11 @@ OTRAS OPCIONES
 
 PRIVACIDAD
 
-El archivo para IA intenta retirar identidad, coordenadas, títulos e
-identificadores reales. La caché y la sesión sí son privadas y nunca deben
+La privacidad se aplica automáticamente. Retira identidad e identificadores
+personales, pero conserva títulos, GPS, altitud, desnivel, vueltas y GAP/RAP.
+
+Las coordenadas son exactas y pueden revelar dónde entrenas. Revisa el archivo
+antes de compartirlo. La caché y la sesión sí son privadas y nunca deben
 subirse a Git.
 
 Los nombres personalizados de zapatillas o bicicletas sí aparecen para ayudar

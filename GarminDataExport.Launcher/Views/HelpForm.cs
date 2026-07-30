@@ -63,7 +63,9 @@ internal sealed class HelpForm : Form
             """
             Las exportaciones contienen datos de salud y entrenamiento. Guárdalas como documentos personales y revisa el archivo antes de compartirlo.
 
-            El modo preparado para IA intenta retirar identidad, coordenadas e identificadores reales. La caché local puede conservar respuestas originales de Garmin y por eso nunca debe subirse a Git.
+            La privacidad es automática: retira identidad e identificadores personales, pero conserva títulos, coordenadas exactas, tracks, altitud, desnivel, vueltas y GAP/RAP. Las coordenadas pueden revelar dónde entrenas: revisa el archivo antes de compartirlo.
+
+            La caché local puede conservar respuestas originales de Garmin y por eso nunca debe subirse a Git.
 
             El nombre, fabricante y modelo de las zapatillas, bicicletas u otro equipo asociado sí aparecen para ayudar a interpretar cada actividad. Los identificadores reales se eliminan. Revisa los nombres personalizados si has escrito información personal dentro de ellos.
 
