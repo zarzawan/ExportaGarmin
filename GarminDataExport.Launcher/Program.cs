@@ -12,6 +12,18 @@ internal static class Program
             return DiagnosePortableInstallation();
 
         ApplicationConfiguration.Initialize();
+        var previewIndex = Array.IndexOf(args, "--readme-preview");
+        if (previewIndex >= 0)
+        {
+            var mode = previewIndex + 1 < args.Length
+                ? args[previewIndex + 1]
+                : "principal";
+            if (mode is not ("principal" or "informe"))
+                return 4;
+            Application.Run(new MainForm(mode));
+            return 0;
+        }
+
         using var singleInstance = new Mutex(
             initiallyOwned: true,
             name: @"Local\GarminDataExportLauncher-v3",
@@ -19,7 +31,7 @@ internal static class Program
         if (!isFirstInstance)
         {
             MessageBox.Show(
-                "EntrenaIA ya está abierto.\n\n" +
+                "ExportaGarmin ya está abierto.\n\n" +
                 "Utiliza la ventana existente para evitar que dos exportaciones se pisen.",
                 "Programa ya abierto",
                 MessageBoxButtons.OK,

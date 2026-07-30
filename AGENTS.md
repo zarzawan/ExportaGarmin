@@ -30,6 +30,7 @@ El esquema compacto actual es `3.1.0`.
 | `GarminDataExport.Launcher/` | Asistente gráfico WinForms en español |
 | `Setup-Windows.ps1` | Instalación reproducible en Windows |
 | `scripts/Build-PortableRelease.ps1` | Construcción y validación del ZIP portable |
+| `scripts/Capture-ReadmeScreenshots.ps1` | Capturas reproducibles con datos ficticios |
 | `tests/` | Pruebas sin red con datos anonimizados |
 
 Clases principales del backend:
@@ -287,6 +288,10 @@ Documentos\Garmin para IA\<alias-id>\
 
 El perfil heredado puede usar `%USERPROFILE%\.garminconnect`.
 
+Aunque el nombre público sea ExportaGarmin, se conserva la ruta interna
+`GarminDataExportLauncher` para que una actualización encuentre los perfiles,
+sesiones, anotaciones y cachés existentes sin mover ni copiar su contenido.
+
 La carpeta Documentos puede estar redirigida a OneDrive. No afirmar que los
 resultados permanecen solo en el PC sin advertir esta posibilidad.
 
@@ -346,11 +351,11 @@ La descarga pública de Windows utiliza:
 - versiones fijadas en `requirements-windows-lock.txt`.
 
 El usuario normal descarga
-`EntrenaIA-VERSION-Windows-x64.zip`, lo extrae y abre `EntrenaIA.exe`. No
+`ExportaGarmin-VERSION-Windows-x64.zip`, lo extrae y abre `ExportaGarmin.exe`. No
 necesita Python, un runtime de .NET ni un SDK instalados. El ZIP contiene:
 
 ```text
-EntrenaIA.exe
+ExportaGarmin.exe
 app/garmin_export.pyc
 app/training_analysis.pyc
 runtime/python/
@@ -374,7 +379,7 @@ como `win-x64` autocontenido, ejecuta el diagnóstico y crea el ZIP y su
 
 `Instalar.bat` y `Setup-Windows.ps1` son solo para desarrollar desde el código
 fuente. Crean `.venv`, instalan el SDK estable de .NET 10 LTS si falta,
-restauran, compilan y publican `EntrenaIA.exe`. El inicio de sesión corresponde
+restauran, compilan y publican `ExportaGarmin.exe`. El inicio de sesión corresponde
 al asistente gráfico, no al instalador.
 
 El instalador técnico valida que una `.venv` existente funcione realmente con
@@ -396,11 +401,14 @@ bin/
 obj/
 GarminLauncher.exe
 EntrenaIA.exe
+ExportaGarmin.exe
 artifacts/
 ```
 
 Los datos del lanzador se guardan fuera del repositorio. No inspeccionar,
 copiar ni incluir exportaciones reales, cachés o tokenstores en pruebas.
+Las capturas públicas deben generarse únicamente con `--readme-preview`; nunca
+capturar una ventana asociada a un perfil real.
 
 ## Validación antes de entregar
 
@@ -410,7 +418,7 @@ copiar ni incluir exportaciones reales, cachés o tokenstores en pruebas.
 dotnet restore GarminDataExport.slnx
 dotnet build GarminDataExport.slnx --no-restore
 dotnet run --project GarminDataExport.csproj -- --help
-.\scripts\Build-PortableRelease.ps1 -Version 3.2.0
+.\scripts\Build-PortableRelease.ps1 -Version 3.3.0
 ```
 
 También:

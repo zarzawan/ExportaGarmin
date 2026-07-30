@@ -1,7 +1,7 @@
 ﻿[CmdletBinding()]
 param(
     [ValidatePattern('^\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$')]
-    [string]$Version = '3.2.0',
+    [string]$Version = '3.3.0',
 
     [string]$OutputDirectory,
 
@@ -19,7 +19,7 @@ if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $projectRoot 'artifacts'
 }
 $outputRoot = [IO.Path]::GetFullPath($OutputDirectory)
-$packageName = "EntrenaIA-$Version-Windows-x64"
+$packageName = "ExportaGarmin-$Version-Windows-x64"
 $packageRoot = Join-Path $outputRoot $packageName
 $stagingRoot = Join-Path $outputRoot '.staging'
 $publishRoot = Join-Path $stagingRoot 'dotnet'
@@ -157,12 +157,12 @@ Invoke-Checked `
         '-o', $publishRoot) `
     -FailureMessage 'No se pudo publicar el lanzador .NET.'
 
-$launcher = Join-Path $publishRoot 'EntrenaIA.exe'
+$launcher = Join-Path $publishRoot 'ExportaGarmin.exe'
 if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) {
-    throw 'La publicación no generó EntrenaIA.exe.'
+    throw 'La publicación no generó ExportaGarmin.exe.'
 }
 Copy-Item -LiteralPath $launcher -Destination (
-    Join-Path $packageRoot 'EntrenaIA.exe')
+    Join-Path $packageRoot 'ExportaGarmin.exe')
 
 if (-not (Test-Path -LiteralPath $pythonArchive -PathType Leaf) -or
     -not [string]::Equals(
@@ -240,8 +240,20 @@ foreach ($file in @(
         -LiteralPath (Join-Path $projectRoot $file) `
         -Destination (Join-Path $packageRoot $file)
 }
+$documentationImages = Join-Path $projectRoot 'docs\images'
+if (-not (Test-Path -LiteralPath $documentationImages -PathType Container)) {
+    throw 'No se encontraron las capturas públicas de documentación.'
+}
+New-Item `
+    -ItemType Directory `
+    -Path (Join-Path $packageRoot 'docs') `
+    -Force | Out-Null
+Copy-Item `
+    -LiteralPath $documentationImages `
+    -Destination (Join-Path $packageRoot 'docs\images') `
+    -Recurse
 @(
-    "EntrenaIA $Version",
+    "ExportaGarmin $Version",
     '.NET 10 LTS autocontenido',
     "Python $pythonVersion portable",
     'Arquitectura: Windows x64'
@@ -258,13 +270,13 @@ try {
     # El enlace al repositorio sigue siendo suficiente.
 }
 @(
-    'CÓDIGO FUENTE DE ENTRENAIA',
-    '==========================',
+    'CÓDIGO FUENTE DE EXPORTAGARMIN',
+    '===============================',
     '',
     'Esta descarga contiene la aplicación preparada para su uso normal.',
     'El código fuente se publica por separado en:',
     '',
-    'https://github.com/zarzawan/entrenaia-garmin',
+    'https://github.com/zarzawan/ExportaGarmin',
     '',
     "Versión: $Version",
     "Commit de referencia: $sourceCommit",
@@ -286,7 +298,7 @@ Invoke-Checked `
     -Arguments @((Join-Path $applicationRoot 'garmin_export.pyc'), '--help') `
     -FailureMessage 'El backend portable no puede mostrar su ayuda.'
 $diagnosticProcess = Start-Process `
-    -FilePath (Join-Path $packageRoot 'EntrenaIA.exe') `
+    -FilePath (Join-Path $packageRoot 'ExportaGarmin.exe') `
     -ArgumentList '--diagnose' `
     -WindowStyle Hidden `
     -Wait `

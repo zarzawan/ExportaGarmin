@@ -1,26 +1,28 @@
-ENTRENAIA — EXPORTADOR DE GARMIN PARA IA
-=========================================
+EXPORTAGARMIN
+=============
+
+Tus datos de Garmin, ordenados y preparados para la IA.
 
 ABRIR
 
 1. Extrae por completo el ZIP que has descargado.
-2. No muevas solo EntrenaIA.exe: conserva junto todo el contenido extraído.
-3. Haz doble clic en EntrenaIA.exe.
+2. No muevas solo ExportaGarmin.exe: conserva junto todo el contenido extraído.
+3. Haz doble clic en ExportaGarmin.exe.
 
 No necesitas instalar nada más.
 
 Si descargaste el código fuente en vez de
-EntrenaIA-3.2.0-Windows-x64.zip, vuelve a GitHub Releases y descarga el
+ExportaGarmin-3.3.0-Windows-x64.zip, vuelve a GitHub Releases y descarga el
 archivo correcto de la sección Assets.
 
 AVISO DE WINDOWS
 
-Es posible que Windows muestre un aviso la primera vez. EntrenaIA es gratuito:
+Es posible que Windows muestre un aviso la primera vez. ExportaGarmin es gratuito:
 no gano ni pretendo ganar dinero con el programa. Para reducir este tipo de
 avisos tendría que comprar y renovar un certificado comercial, y ese gasto no
 forma parte del objetivo de este proyecto personal y gratuito.
 
-Si descargaste EntrenaIA desde la versión oficial, pulsa
+Si descargaste ExportaGarmin desde la versión oficial, pulsa
 "Más información" y después "Ejecutar de todas formas". No desactives el
 antivirus.
 
@@ -80,6 +82,6 @@ tarde si los datos que faltan son importantes.
 
 La guía completa está en README.md.
 
-EntrenaIA es gratuito y no oficial. No pertenece a Garmin, no está afiliado a
+ExportaGarmin es gratuito y no oficial. No pertenece a Garmin, no está afiliado a
 Garmin ni cuenta con su respaldo. Está basado en
 sirredbeard/garmin-data-export.

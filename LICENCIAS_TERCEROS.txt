@@ -1,5 +1,5 @@
-ENTRENAIA — COMPONENTES DE TERCEROS
-===================================
+EXPORTAGARMIN — COMPONENTES DE TERCEROS
+========================================
 
 La descarga portable incorpora componentes que mantienen sus propias
 licencias:
@@ -19,6 +19,6 @@ dentro de:
 
 runtime\python\Lib\site-packages\NOMBRE.dist-info\
 
-EntrenaIA no modifica los términos de esos componentes. El código propio y el
+ExportaGarmin no modifica los términos de esos componentes. El código propio y el
 trabajo derivado del proyecto original se distribuyen bajo Apache License 2.0,
 incluida en el archivo LICENSE de esta carpeta.

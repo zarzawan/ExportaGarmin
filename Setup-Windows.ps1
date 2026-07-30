@@ -77,16 +77,16 @@ function Require-Winget {
 }
 
 Write-Host ''
-Write-Host 'EntrenaIA - Preparación desde el código fuente' -ForegroundColor Cyan
+Write-Host 'ExportaGarmin - Preparación desde el código fuente' -ForegroundColor Cyan
 Write-Host '=========================================================' -ForegroundColor Cyan
 Write-Host ''
 Write-Host 'No cierres esta ventana. Se comprobarán todos los requisitos.' -ForegroundColor Gray
 Write-Host 'La descarga normal de GitHub Releases no necesita este proceso.' -ForegroundColor Gray
 Write-Host ''
 
-$runningLauncher = Get-Process -Name EntrenaIA, GarminLauncher -ErrorAction SilentlyContinue
+$runningLauncher = Get-Process -Name ExportaGarmin, EntrenaIA, GarminLauncher -ErrorAction SilentlyContinue
 if ($runningLauncher) {
-    throw 'EntrenaIA está abierto. Cierra su ventana y ejecuta de nuevo Instalar.bat.'
+    throw 'ExportaGarmin está abierto. Cierra su ventana y ejecuta de nuevo Instalar.bat.'
 }
 
 $pythonExe = Find-Python311
@@ -199,7 +199,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $publishDirectory = Join-Path $projectRoot 'GarminDataExport.Launcher\bin\publish'
-Write-Host 'Creando EntrenaIA.exe...' -ForegroundColor Yellow
+Write-Host 'Creando ExportaGarmin.exe...' -ForegroundColor Yellow
 & $dotnetExe publish `
     (Join-Path $projectRoot 'GarminDataExport.Launcher\GarminDataExport.Launcher.csproj') `
     -c Release `
@@ -210,11 +210,11 @@ Write-Host 'Creando EntrenaIA.exe...' -ForegroundColor Yellow
     -p:DebugSymbols=false `
     -o $publishDirectory
 if ($LASTEXITCODE -ne 0) {
-    throw "No se pudo crear EntrenaIA.exe. Código de error: $LASTEXITCODE."
+    throw "No se pudo crear ExportaGarmin.exe. Código de error: $LASTEXITCODE."
 }
 
-$publishedExe = Join-Path $publishDirectory 'EntrenaIA.exe'
-$rootExe = Join-Path $projectRoot 'EntrenaIA.exe'
+$publishedExe = Join-Path $publishDirectory 'ExportaGarmin.exe'
+$rootExe = Join-Path $projectRoot 'ExportaGarmin.exe'
 Copy-Item -LiteralPath $publishedExe -Destination $rootExe -Force
 
 Write-Host ''
@@ -223,7 +223,7 @@ Write-Host "Lanzador: $rootExe"
 Write-Host ''
 Write-Host 'Siguiente paso:' -ForegroundColor Cyan
 Write-Host '1. Cierra esta ventana.'
-Write-Host '2. Haz doble clic en EntrenaIA.exe.'
+Write-Host '2. Haz doble clic en ExportaGarmin.exe.'
 Write-Host '3. Sigue el asistente Primeros pasos para elegir perfil e iniciar sesión.'
 Write-Host ''
 Write-Host 'Escribe tus credenciales y el MFA únicamente en la ventana de inicio de sesión.' -ForegroundColor Yellow
