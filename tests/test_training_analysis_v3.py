@@ -828,6 +828,10 @@ class PrivacyAuditTests(unittest.TestCase):
             ["123…", "Mad…"],
             exact_private_value["forbidden_values_detected"],
         )
+        self.assertEqual(
+            ["legacy_reference", "safe_field"],
+            exact_private_value["forbidden_value_paths"],
+        )
 
     def test_exception_summary_never_copies_raw_message(self):
         raw_secret = "https://sso.example.invalid?token=123456789"

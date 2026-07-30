@@ -2227,6 +2227,8 @@ def is_personal_data_key(key: Any, parents: Iterable[Any] = ()) -> bool:
     has_identifier_suffix = bool(
         re.search(r"(?:^|[_-])(?:id|uuid)$", str(key), re.IGNORECASE)
         or re.search(r"(?:Id|ID|Uuid|UUID)$", str(key))
+        or re.search(r"(?:^|[_-])pk$", str(key), re.IGNORECASE)
+        or re.search(r"(?:Pk|PK)$", str(key))
     )
     return has_identifier_suffix
 
@@ -2238,7 +2240,7 @@ def privacy_audit(
 ) -> dict:
     """Comprueba la única política: ocultar identidad y conservar deporte."""
     key_violations: list[str] = []
-    scalar_values: list[str] = []
+    scalar_values: list[tuple[str, str]] = []
 
     def visit(value: Any, path: str = "", parents: tuple[str, ...] = ()):
         if isinstance(value, dict):
@@ -2254,25 +2256,34 @@ def privacy_audit(
             for index, nested in enumerate(value):
                 visit(nested, f"{path}[{index}]", parents)
         elif value is not None:
-            scalar_values.append(str(value))
+            scalar_values.append((path, str(value)))
 
     visit(model)
     value_violations = []
+    value_violation_paths = []
     for raw in forbidden_values or []:
         candidate = str(raw)
-        if len(candidate) >= 4 and candidate in scalar_values:
+        matching_paths = [
+            path for path, value in scalar_values
+            if value == candidate
+        ]
+        if len(candidate) >= 4 and matching_paths:
             value_violations.append(candidate[:3] + "…")
+            value_violation_paths.extend(matching_paths)
     for raw in forbidden_identifiers or []:
         candidate = str(raw)
-        if (
-            len(candidate) >= 6
-            and candidate in scalar_values
-        ):
+        matching_paths = [
+            path for path, value in scalar_values
+            if value == candidate
+        ]
+        if len(candidate) >= 6 and matching_paths:
             value_violations.append(candidate[:3] + "…")
+            value_violation_paths.extend(matching_paths)
     return {
         "passed": not key_violations and not value_violations,
         "forbidden_key_paths": sorted(set(key_violations)),
         "forbidden_values_detected": sorted(set(value_violations)),
+        "forbidden_value_paths": sorted(set(value_violation_paths)),
     }
 
 

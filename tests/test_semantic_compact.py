@@ -214,6 +214,7 @@ class SemanticHelperTests(unittest.TestCase):
             ],
             "gear": [
                 {
+                    "gearPk": 987654321,
                     "uuid": "gear-1",
                     "displayName": "Zapatillas de competición",
                     "gearMakeName": "ASICS",
@@ -240,10 +241,16 @@ class SemanticHelperTests(unittest.TestCase):
         self.assertFalse(gear["model_user_provided"])
         self.assertNotIn("custom_name", gear)
         self.assertNotIn("gear-1", text)
+        self.assertNotIn("987654321", text)
         self.assertEqual("Rodaje", result["name"])
         self.assertNotIn('"activity_id"', text)
         self.assertIn("latitude", text.lower())
         self.assertNotIn("No exportar", text)
+        audit = privacy_audit(
+            {"activities": [result]},
+            forbidden_identifiers=[987654321],
+        )
+        self.assertTrue(audit["passed"], audit)
 
     def test_private_export_keeps_complete_sport_data(self):
         raw = self._complete_sport_activity()

@@ -3522,6 +3522,12 @@ class GarminExporter:
                     + ", ".join(paths[:8])
                 )
             if audit.get("forbidden_values_detected"):
+                value_paths = audit.get("forbidden_value_paths", [])
+                if value_paths:
+                    log.error(
+                        "Los valores no permitidos aparecieron en estos campos: "
+                        + ", ".join(value_paths[:8])
+                    )
                 log.error(
                     "La auditoría encontró valores personales o identificadores "
                     "en campos que debían estar filtrados."
