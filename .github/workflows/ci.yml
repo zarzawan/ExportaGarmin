@@ -1,0 +1,49 @@
+name: Calidad
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validar:
+    name: Pruebas y compilación
+    runs-on: windows-latest
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Preparar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements-windows-lock.txt
+
+      - name: Preparar .NET 10 LTS
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Instalar dependencias Python
+        run: python -m pip install -r requirements-windows-lock.txt
+
+      - name: Comprobar sintaxis Python
+        run: python -m py_compile garmin_export.py training_analysis.py
+
+      - name: Ejecutar pruebas
+        run: python -m unittest discover -s tests -v
+
+      - name: Restaurar .NET
+        run: dotnet restore GarminDataExport.slnx
+
+      - name: Compilar .NET
+        run: dotnet build GarminDataExport.slnx --no-restore
+
+      - name: Comprobar la ayuda de la capa .NET
+        run: dotnet run --project GarminDataExport.csproj -- --help

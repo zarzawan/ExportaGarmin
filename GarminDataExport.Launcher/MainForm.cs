@@ -11,6 +11,10 @@ namespace GarminDataExport.Launcher;
 
 internal sealed class MainForm : Form
 {
+    private const string RepairInstallationMessage =
+        "La instalación no está completa. Vuelve a extraer el ZIP de EntrenaIA. " +
+        "Si trabajas desde el código fuente, ejecuta Instalar.bat.";
+
     private static readonly (string Original, string Translation)[] SectionTranslations =
     [
         ("Export Metadata", "Metadatos de la exportación"),
@@ -597,12 +601,17 @@ internal sealed class MainForm : Form
             return;
         _runButton.Enabled = false;
         _status.Text = "Comprobando la instalación…";
-        var python = Path.Combine(_projectRoot, ".venv", "Scripts", "python.exe");
-        var script = Path.Combine(_projectRoot, "garmin_export.py");
+        var backend = BackendPaths.TryResolve(_projectRoot);
+        if (backend is null)
+        {
+            _status.Text =
+                "La instalación está incompleta. Vuelve a extraer la descarga completa.";
+            return;
+        }
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         _capabilities = await BackendCapabilities.DetectAsync(
-            python,
-            script,
+            backend.PythonPath,
+            backend.ScriptPath,
             timeout.Token);
         ApplyCapabilities();
         if (_capabilities.IsReady)
@@ -612,7 +621,7 @@ internal sealed class MainForm : Form
         else
         {
             _status.Text =
-                "La instalación está incompleta o no coincide con esta versión. Ejecuta Instalar.bat.";
+                "La instalación está incompleta o no coincide con esta versión. Vuelve a extraer la descarga completa.";
             return;
         }
         _status.Text = AppPaths.HasSession(_activeProfile ?? _profileStore.Profiles[0])
@@ -764,12 +773,12 @@ internal sealed class MainForm : Form
     {
         if (_activeProfile is null || _projectRoot is null)
         {
-            ShowError("No se encontró la instalación completa. Ejecuta Instalar.bat para repararla.");
+            ShowError(RepairInstallationMessage);
             return;
         }
         if (_capabilities?.IsReady != true)
         {
-            ShowError("La instalación no está lista. Ejecuta Instalar.bat para repararla.");
+            ShowError(RepairInstallationMessage);
             return;
         }
         if (SessionLoginLauncher.IsRunning)
@@ -834,7 +843,7 @@ internal sealed class MainForm : Form
             return;
         if (_capabilities?.IsReady != true)
         {
-            ShowError("La instalación no está lista. Ejecuta Instalar.bat para repararla.");
+            ShowError(RepairInstallationMessage);
             return;
         }
         if (SessionLoginLauncher.IsRunning)
@@ -913,7 +922,7 @@ internal sealed class MainForm : Form
             return;
         if (_capabilities?.IsReady != true)
         {
-            ShowError("La instalación no está lista. Ejecuta Instalar.bat para repararla.");
+            ShowError(RepairInstallationMessage);
             return;
         }
         if (SessionLoginLauncher.IsRunning)
@@ -932,7 +941,7 @@ internal sealed class MainForm : Form
             MessageBox.Show(
                 this,
                 "Esta versión no puede mostrar la lista automáticamente. " +
-                "Ejecuta Instalar.bat para actualizar o reparar el programa.",
+                "Descarga de nuevo la versión completa para actualizar o reparar el programa.",
                 "Lista no disponible",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);
@@ -1015,12 +1024,12 @@ internal sealed class MainForm : Form
     {
         if (_activeProfile is null || _projectRoot is null)
         {
-            ShowError("No se encontró la instalación completa. Ejecuta Instalar.bat para repararla.");
+            ShowError(RepairInstallationMessage);
             return;
         }
         if (_capabilities?.IsReady != true)
         {
-            ShowError("La instalación no está lista. Ejecuta Instalar.bat para repararla.");
+            ShowError(RepairInstallationMessage);
             return;
         }
         if (SessionLoginLauncher.IsRunning)
@@ -1214,28 +1223,21 @@ internal sealed class MainForm : Form
     {
         if (_projectRoot is null)
             throw new InvalidOperationException("No se encontró el proyecto.");
+        var backend = BackendPaths.TryResolve(_projectRoot)
+            ?? throw new InvalidOperationException(
+                "No se encontró la instalación completa de EntrenaIA.");
         var startInfo = new ProcessStartInfo
         {
-            FileName = Path.Combine(_projectRoot, ".venv", "Scripts", "python.exe"),
-            WorkingDirectory = _projectRoot,
+            FileName = backend.PythonPath,
+            WorkingDirectory = backend.ApplicationRoot,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
         };
         startInfo.Environment["PYTHONUNBUFFERED"] = "1";
-        foreach (var variable in new[]
-                 {
-                     "GARMIN_EMAIL",
-                     "GARMIN_PASSWORD",
-                     "EMAIL",
-                     "PASSWORD",
-                     "GARMINTOKENS",
-                 })
-        {
-            startInfo.Environment.Remove(variable);
-        }
-        startInfo.ArgumentList.Add(Path.Combine(_projectRoot, "garmin_export.py"));
+        backend.ApplySafePythonEnvironment(startInfo.Environment);
+        startInfo.ArgumentList.Add(backend.ScriptPath);
         return startInfo;
     }
 
@@ -1826,33 +1828,12 @@ internal sealed class MainForm : Form
 
     private void LocateProject()
     {
-        _projectRoot = FindProjectRoot();
+        _projectRoot = BackendPaths.Find()?.ApplicationRoot;
         if (_projectRoot is not null)
             return;
         _status.Text = "No se encontró la instalación completa.";
         _runButton.Enabled = false;
-        _sessionStatus.Text = "Ejecuta Instalar.bat";
-    }
-
-    private static string? FindProjectRoot()
-    {
-        var startingDirectories = new[]
-        {
-            AppContext.BaseDirectory,
-            Environment.CurrentDirectory,
-        };
-        foreach (var startingDirectory in startingDirectories.Distinct())
-        {
-            var directory = new DirectoryInfo(startingDirectory);
-            for (var level = 0; directory is not null && level < 8; level++, directory = directory.Parent)
-            {
-                var script = Path.Combine(directory.FullName, "garmin_export.py");
-                var python = Path.Combine(directory.FullName, ".venv", "Scripts", "python.exe");
-                if (File.Exists(script) && File.Exists(python))
-                    return directory.FullName;
-            }
-        }
-        return null;
+        _sessionStatus.Text = "Vuelve a extraer EntrenaIA";
     }
 
     private void LoadSettings()

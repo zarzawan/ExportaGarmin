@@ -1,0 +1,24 @@
+ENTRENAIA — COMPONENTES DE TERCEROS
+===================================
+
+La descarga portable incorpora componentes que mantienen sus propias
+licencias:
+
+- Python 3.11.9, distribuido por Python Software Foundation.
+  Su licencia está incluida en runtime\python\LICENSE.txt.
+- garminconnect y garth, utilizados para comunicarse con Garmin Connect.
+- openpyxl y et_xmlfile, utilizados para crear libros XLSX.
+- requests, requests-oauthlib, oauthlib, urllib3, certifi, idna y
+  charset-normalizer, utilizados para comunicaciones HTTP y OAuth.
+- pydantic, pydantic-core, annotated-types, typing-extensions y
+  typing-inspection, utilizados para validar estructuras.
+- tzdata, utilizado para zonas horarias en Windows.
+
+Los metadatos y textos de licencia instalados por cada paquete se conservan
+dentro de:
+
+runtime\python\Lib\site-packages\NOMBRE.dist-info\
+
+EntrenaIA no modifica los términos de esos componentes. El código propio y el
+trabajo derivado del proyecto original se distribuyen bajo Apache License 2.0,
+incluida en el archivo LICENSE de esta carpeta.

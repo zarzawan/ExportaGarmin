@@ -11,6 +11,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+artifacts/
 *.egg
 .eggs/
 *.whl
@@ -47,6 +48,9 @@ Desktop.ini
 bin/
 obj/
 GarminLauncher.exe
+EntrenaIA.exe
+EntrenaIA-*-Windows-x64.zip
+EntrenaIA-*-Windows-x64.zip.sha256
 *.user
 *.suo
 *.userprefs

@@ -13,36 +13,21 @@ internal static class SessionValidator
         if (!AppPaths.HasSession(profile))
             return false;
 
-        var pythonPath = Path.Combine(
-            projectRoot,
-            ".venv",
-            "Scripts",
-            "python.exe");
-        var scriptPath = Path.Combine(projectRoot, "garmin_export.py");
-        if (!File.Exists(pythonPath) || !File.Exists(scriptPath))
+        var backend = BackendPaths.TryResolve(projectRoot);
+        if (backend is null)
             return false;
 
         var startInfo = new ProcessStartInfo
         {
-            FileName = pythonPath,
-            WorkingDirectory = projectRoot,
+            FileName = backend.PythonPath,
+            WorkingDirectory = backend.ApplicationRoot,
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
         };
-        foreach (var variable in new[]
-                 {
-                     "GARMIN_EMAIL",
-                     "GARMIN_PASSWORD",
-                     "EMAIL",
-                     "PASSWORD",
-                     "GARMINTOKENS",
-                 })
-        {
-            startInfo.Environment.Remove(variable);
-        }
-        startInfo.ArgumentList.Add(scriptPath);
+        backend.ApplySafePythonEnvironment(startInfo.Environment);
+        startInfo.ArgumentList.Add(backend.ScriptPath);
         startInfo.ArgumentList.Add("--check-session");
         startInfo.ArgumentList.Add("--ignore-credential-env");
         startInfo.ArgumentList.Add("--non-interactive-auth");

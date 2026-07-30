@@ -1,12 +1,20 @@
 ENTRENAIA — EXPORTADOR DE GARMIN PARA IA
 =========================================
 
-INSTALAR
+ABRIR
 
 1. Extrae por completo el ZIP que has descargado.
-2. Haz doble clic en Instalar.bat.
-3. No cierres la ventana negra mientras trabaja.
-4. Cuando termine, abre GarminLauncher.exe.
+2. Conserva juntas las carpetas app y runtime.
+3. Haz doble clic en EntrenaIA.exe.
+
+No necesitas instalar Python, .NET, Visual Studio ni un SDK.
+
+Si descargaste el código fuente en vez de
+EntrenaIA-3.2.0-Windows-x64.zip, vuelve a GitHub Releases y descarga el
+archivo correcto de la sección Assets.
+
+El archivo CODIGO_FUENTE.txt indica dónde consultar el código correspondiente
+a esta versión.
 
 PRIMERA VEZ
 

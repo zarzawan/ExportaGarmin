@@ -1,0 +1,86 @@
+name: Publicar versión portable
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Versión sin el prefijo v
+        required: true
+        default: '3.2.0'
+
+permissions:
+  contents: write
+
+jobs:
+  publicar:
+    name: Crear ZIP portable y Release
+    runs-on: windows-latest
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Preparar Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: requirements-windows-lock.txt
+
+      - name: Preparar .NET 10 LTS
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Instalar dependencias para las pruebas
+        run: python -m pip install -r requirements-windows-lock.txt
+
+      - name: Determinar versión
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $version = "${{ inputs.version }}"
+          } else {
+            $version = "${{ github.ref_name }}".TrimStart('v')
+          }
+          if ($version -notmatch '^\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$') {
+            throw "La versión no es válida: $version"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+
+      - name: Construir y validar la descarga
+        shell: pwsh
+        run: >
+          ./scripts/Build-PortableRelease.ps1
+          -Version '${{ steps.version.outputs.version }}'
+          -BuilderPython (Get-Command python).Source
+
+      - name: Publicar los archivos de la versión
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $tag = '${{ steps.version.outputs.tag }}'
+          $zip = "artifacts/EntrenaIA-$version-Windows-x64.zip"
+          $hash = "$zip.sha256"
+          $notes = @"
+          Descarga **EntrenaIA-$version-Windows-x64.zip**, extráelo por completo
+          y abre **EntrenaIA.exe**. No necesitas instalar Python, .NET ni un SDK.
+
+          El archivo `.sha256` permite comprobar la integridad de la descarga.
+          Los enlaces **Source code** son únicamente para desarrollo.
+          "@
+          if (gh release view $tag 2>$null) {
+            gh release upload $tag $zip $hash --clobber
+          } else {
+            gh release create $tag $zip $hash `
+              --title "EntrenaIA $version" `
+              --generate-notes `
+              --notes $notes
+          }

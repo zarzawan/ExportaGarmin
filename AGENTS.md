@@ -29,6 +29,7 @@ El esquema compacto actual es `3.1.0`.
 | `GarminDataExport.csproj` | Capa .NET de consola que conserva el diseño original |
 | `GarminDataExport.Launcher/` | Asistente gráfico WinForms en español |
 | `Setup-Windows.ps1` | Instalación reproducible en Windows |
+| `scripts/Build-PortableRelease.ps1` | Construcción y validación del ZIP portable |
 | `tests/` | Pruebas sin red con datos anonimizados |
 
 Clases principales del backend:
@@ -338,20 +339,47 @@ llamadas hay una pausa preventiva.
 
 ## Instalación
 
-La edición de Windows utiliza:
+La descarga pública de Windows utiliza:
 
-- Python 3.11;
-- .NET 11;
+- Python 3.11.9 portable;
+- .NET 10 LTS autocontenido;
 - versiones fijadas en `requirements-windows-lock.txt`.
 
-`Instalar.bat` llama a `Setup-Windows.ps1`, crea `.venv`, restaura, compila y
-publica `GarminLauncher.exe`. El inicio de sesión corresponde al asistente
-gráfico, no al instalador.
+El usuario normal descarga
+`EntrenaIA-VERSION-Windows-x64.zip`, lo extrae y abre `EntrenaIA.exe`. No
+necesita Python, un runtime de .NET ni un SDK instalados. El ZIP contiene:
 
-El instalador valida que una `.venv` existente funcione realmente con Python
-3.11. Si no es compatible, la mueve de forma recuperable a una carpeta
-`.venv.incompatible-*` dentro del proyecto. Tras instalar .NET vuelve a
-comprobar que el SDK 11 esté disponible.
+```text
+EntrenaIA.exe
+app/garmin_export.pyc
+app/training_analysis.pyc
+runtime/python/
+LEEME_PRIMERO.txt
+LICENSE
+LICENCIAS_TERCEROS.txt
+CODIGO_FUENTE.txt
+VERSION.txt
+```
+
+El lanzador busca primero este diseño portable. Para desarrollo sigue
+aceptando `garmin_export.py` y `.venv/Scripts/python.exe` en la raíz.
+Los `.pyc` de la descarga se compilan con Python 3.11. El código fuente
+legible permanece separado y se obtiene desde el repositorio público indicado
+en `CODIGO_FUENTE.txt`.
+
+`scripts/Build-PortableRelease.ps1` descarga el runtime oficial fijado de
+Python, verifica su SHA-256, instala el lock dentro del paquete, publica .NET
+como `win-x64` autocontenido, ejecuta el diagnóstico y crea el ZIP y su
+`.sha256`. Los artefactos quedan en `artifacts/` y nunca se versionan.
+
+`Instalar.bat` y `Setup-Windows.ps1` son solo para desarrollar desde el código
+fuente. Crean `.venv`, instalan el SDK estable de .NET 10 LTS si falta,
+restauran, compilan y publican `EntrenaIA.exe`. El inicio de sesión corresponde
+al asistente gráfico, no al instalador.
+
+El instalador técnico valida que una `.venv` existente funcione realmente con
+Python 3.11. Si no es compatible, la mueve de forma recuperable a una carpeta
+`.venv.incompatible-*` dentro del proyecto.
 
 ## Archivos que nunca se suben
 
@@ -367,6 +395,8 @@ export/
 bin/
 obj/
 GarminLauncher.exe
+EntrenaIA.exe
+artifacts/
 ```
 
 Los datos del lanzador se guardan fuera del repositorio. No inspeccionar,
@@ -380,6 +410,7 @@ copiar ni incluir exportaciones reales, cachés o tokenstores en pruebas.
 dotnet restore GarminDataExport.slnx
 dotnet build GarminDataExport.slnx --no-restore
 dotnet run --project GarminDataExport.csproj -- --help
+.\scripts\Build-PortableRelease.ps1 -Version 3.2.0
 ```
 
 También:
