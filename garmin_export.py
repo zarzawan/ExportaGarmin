@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-EntrenaIA: exportador no oficial de Garmin Connect para IA.
+ExportaGarmin: tus datos de Garmin, ordenados y preparados para la IA.
 
 Descarga datos de salud, forma física y actividades mediante la biblioteca
 python-garminconnect y los guarda como texto con bloques JSON. El modo completo
@@ -5860,7 +5860,7 @@ Inicio de sesión:
     _compact_mode = args.compact
 
     print()
-    print("  EntrenaIA — Exportador de Garmin para IA")
+    print("  ExportaGarmin — Tus datos de Garmin, ordenados y preparados para la IA")
     print(f"  {'-' * 38}")
     print()
 

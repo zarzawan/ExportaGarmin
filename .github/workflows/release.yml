@@ -9,7 +9,7 @@ on:
       version:
         description: Versión sin el prefijo v
         required: true
-        default: '3.2.0'
+        default: '3.3.0'
 
 permissions:
   contents: write
@@ -67,20 +67,22 @@ jobs:
         run: |
           $version = '${{ steps.version.outputs.version }}'
           $tag = '${{ steps.version.outputs.tag }}'
-          $zip = "artifacts/EntrenaIA-$version-Windows-x64.zip"
+          $zip = "artifacts/ExportaGarmin-$version-Windows-x64.zip"
           $hash = "$zip.sha256"
           $notes = @"
-          Descarga **EntrenaIA-$version-Windows-x64.zip**, extráelo por completo
-          y abre **EntrenaIA.exe**. No necesitas instalar Python, .NET ni un SDK.
+          Descarga **ExportaGarmin-$version-Windows-x64.zip**, pulsa
+          **Extraer todo** y abre **ExportaGarmin.exe** desde la carpeta
+          extraída. No necesitas instalar nada más.
 
-          El archivo `.sha256` permite comprobar la integridad de la descarga.
-          Los enlaces **Source code** son únicamente para desarrollo.
+          ExportaGarmin es gratuito y no tiene una firma comercial de pago.
+          Si Windows muestra un aviso y has descargado el archivo desde esta
+          página oficial, pulsa **Más información > Ejecutar de todas formas**.
           "@
           if (gh release view $tag 2>$null) {
             gh release upload $tag $zip $hash --clobber
           } else {
             gh release create $tag $zip $hash `
-              --title "EntrenaIA $version" `
+              --title "ExportaGarmin $version" `
               --generate-notes `
               --notes $notes
           }

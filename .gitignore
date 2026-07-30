@@ -49,8 +49,11 @@ bin/
 obj/
 GarminLauncher.exe
 EntrenaIA.exe
+ExportaGarmin.exe
 EntrenaIA-*-Windows-x64.zip
 EntrenaIA-*-Windows-x64.zip.sha256
+ExportaGarmin-*-Windows-x64.zip
+ExportaGarmin-*-Windows-x64.zip.sha256
 *.user
 *.suo
 *.userprefs

@@ -36,7 +36,7 @@ internal sealed class FirstRunWizardForm : Form
             Dock = DockStyle.Top,
             Height = 64,
             Padding = new Padding(22, 17, 16, 8),
-            Text = "Asistente de EntrenaIA",
+            Text = "Asistente de ExportaGarmin",
             Font = new Font("Segoe UI", 17F, FontStyle.Bold),
         };
         Controls.Add(title);

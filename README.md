@@ -1,8 +1,18 @@
-# EntrenaIA
+# ExportaGarmin
 
-**Exportador de Garmin para IA.** Aplicación gratuita para Windows que
-descarga tus datos de Garmin Connect y crea un archivo ordenado para revisarlo
-manualmente con ChatGPT, NotebookLM, Claude u otra IA.
+**Tus datos de Garmin, ordenados y preparados para la IA.**
+
+Aplicación gratuita para Windows que descarga tus datos de Garmin Connect y
+crea un archivo ordenado para revisarlo manualmente con ChatGPT, NotebookLM,
+Claude u otra IA.
+
+![Ventana principal de ExportaGarmin con datos de demostración](docs/images/exportagarmin-principal.png)
+
+*Ventana principal: revisión semanal recomendada con un perfil de demostración.*
+
+![Selección de fechas para crear un informe histórico](docs/images/exportagarmin-informe.png)
+
+*Creación de un informe para un intervalo concreto, sin datos personales reales.*
 
 Está pensada para preparar una carrera —por ejemplo, una maratón o media
 maratón— sin tener que saber programación. La ventana incluye un asistente de
@@ -13,7 +23,7 @@ archivos automáticamente a ninguna IA**: tú eliges qué archivo compartes y co
 quién.
 
 > [!IMPORTANT]
-> EntrenaIA es un proyecto personal y no oficial: no pertenece a Garmin, no
+> ExportaGarmin es un proyecto personal y no oficial: no pertenece a Garmin, no
 > está afiliado a Garmin ni cuenta con su respaldo. Utilízalo únicamente con
 > tu propia cuenta.
 
@@ -28,8 +38,8 @@ Necesitas Windows 11, conexión a Internet y una cuenta de Garmin Connect.
 ### 1. Descargar
 
 1. Abre la página
-   [Última versión de EntrenaIA](https://github.com/zarzawan/entrenaia-garmin/releases/latest).
-2. En **Assets**, descarga `EntrenaIA-3.2.0-Windows-x64.zip`.
+   [Última versión de ExportaGarmin](https://github.com/zarzawan/ExportaGarmin/releases/latest).
+2. En **Assets**, descarga `ExportaGarmin-3.3.0-Windows-x64.zip`.
 3. No descargues **Source code**: esos enlaces son para programadores.
 4. Abre la carpeta **Descargas**.
 5. Pulsa con el botón derecho sobre el ZIP y elige **Extraer todo**.
@@ -38,16 +48,16 @@ Necesitas Windows 11, conexión a Internet y una cuenta de Garmin Connect.
 ### 2. Preparar
 
 No necesitas instalar nada más. Asegúrate de haber extraído todo el ZIP,
-mantén su contenido junto en la misma carpeta y abre `EntrenaIA.exe` desde esa
-carpeta.
+mantén su contenido junto en la misma carpeta y abre `ExportaGarmin.exe` desde
+esa carpeta.
 
-Es posible que Windows muestre un aviso la primera vez. EntrenaIA es gratuito:
-no gano ni pretendo ganar dinero con el programa. Para reducir este tipo de
-avisos tendría que comprar y renovar un certificado comercial, y ese gasto no
-forma parte del objetivo de este proyecto personal y gratuito.
+Es posible que Windows muestre un aviso la primera vez. ExportaGarmin es
+gratuito: no gano ni pretendo ganar dinero con el programa. Para reducir este
+tipo de avisos tendría que comprar y renovar un certificado comercial, y ese
+gasto no forma parte del objetivo de este proyecto personal y gratuito.
 
 Si lo descargaste desde la
-[versión oficial](https://github.com/zarzawan/entrenaia-garmin/releases/latest),
+[versión oficial](https://github.com/zarzawan/ExportaGarmin/releases/latest),
 pulsa **Más información > Ejecutar de todas formas**. No desactives el
 antivirus.
 
@@ -58,17 +68,17 @@ La descarga incluye un archivo `.sha256`. Para comprobar su integridad, abre
 PowerShell dentro de Descargas y ejecuta:
 
 ```powershell
-Get-FileHash .\EntrenaIA-3.2.0-Windows-x64.zip -Algorithm SHA256
+Get-FileHash .\ExportaGarmin-3.3.0-Windows-x64.zip -Algorithm SHA256
 ```
 
 El resultado debe coincidir con el contenido de
-`EntrenaIA-3.2.0-Windows-x64.zip.sha256`.
+`ExportaGarmin-3.3.0-Windows-x64.zip.sha256`.
 
 </details>
 
 ### 3. Abrir por primera vez
 
-1. Haz doble clic en `EntrenaIA.exe`.
+1. Haz doble clic en `ExportaGarmin.exe`.
 2. Sigue el asistente **Primeros pasos**.
 3. Elige un nombre sencillo para tu perfil.
 4. Pulsa **Iniciar sesión en Garmin**.
@@ -332,7 +342,7 @@ zapatillas, bicicleta u otro equipo sí se incluyen deliberadamente. Esto
 permite distinguir, por ejemplo, unas zapatillas de entrenamiento de un modelo
 con placa de carbono. Sus identificadores reales siguen excluidos. Como el
 nombre puede ser texto escrito por ti, revísalo antes de compartir el archivo
-si contiene información personal. EntrenaIA no inventa si un modelo lleva
+si contiene información personal. ExportaGarmin no inventa si un modelo lleva
 placa: aporta el modelo para que el análisis pueda interpretarlo con prudencia.
 
 La caché sí conserva respuestas originales para no repetir descargas. Nunca
@@ -370,16 +380,16 @@ lo más seguro es crear una cuenta distinta de Windows para cada una.
 | Sesión, caché, carrera y diario | `%LOCALAPPDATA%\GarminDataExportLauncher\profiles\` |
 | Preferencias y lista de perfiles | `%LOCALAPPDATA%\GarminDataExportLauncher\` |
 | Sesión antigua compatible | `%USERPROFILE%\.garminconnect\` |
-| Python incluido en la descarga | `runtime\python\` junto a `EntrenaIA.exe` |
+| Python incluido en la descarga | `runtime\python\` junto a `ExportaGarmin.exe` |
 
 Todo ello queda fuera del repositorio o está cubierto por `.gitignore`.
 
 ## Reparar o actualizar
 
-1. Cierra `EntrenaIA.exe`.
+1. Cierra `ExportaGarmin.exe`.
 2. Descarga el ZIP de la nueva versión desde GitHub Releases.
 3. Extráelo por completo en una carpeta nueva.
-4. Abre el nuevo `EntrenaIA.exe`.
+4. Abre el nuevo `ExportaGarmin.exe`.
 
 Los perfiles, sesiones, caché, carreras, diarios y exportaciones se guardan
 fuera de la carpeta del programa. Actualizar o sustituir esa carpeta no los
@@ -456,7 +466,7 @@ datos privados. No es el recomendado para subir a una IA.
 
 Para trabajar con el código fuente se necesitan Python 3.11 y el SDK de
 .NET 10 LTS. `Instalar.bat` prepara ese entorno técnico y compila
-`EntrenaIA.exe`; no forma parte de la instalación normal de una Release.
+`ExportaGarmin.exe`; no forma parte de la instalación normal de una Release.
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
@@ -467,7 +477,7 @@ dotnet build GarminDataExport.slnx --no-restore
 Crear localmente la misma descarga portable que publica GitHub:
 
 ```powershell
-.\scripts\Build-PortableRelease.ps1 -Version 3.2.0
+.\scripts\Build-PortableRelease.ps1 -Version 3.3.0
 ```
 
 El resultado queda en `artifacts\` e incluye el ZIP y su SHA-256. GitHub

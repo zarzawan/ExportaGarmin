@@ -11,9 +11,11 @@ internal sealed class ProfileStore
     }
 
     private readonly List<UserProfile> _profiles;
+    private readonly bool _persistent;
 
     public ProfileStore()
     {
+        _persistent = true;
         var document = AtomicJsonStore.Read<ProfileDocument>(AppPaths.ProfilesFile);
         var candidates = document?.Profiles
             ?.Where(IsValid)
@@ -74,6 +76,25 @@ internal sealed class ProfileStore
         }
     }
 
+    private ProfileStore(List<UserProfile> profiles)
+    {
+        _profiles = profiles;
+        _persistent = false;
+    }
+
+    internal static ProfileStore CreateReadmePreview() =>
+        new(
+        [
+            new UserProfile
+            {
+                Id = "f1e2d3c4b5a697887766554433221100",
+                Alias = "Perfil de ejemplo",
+                OutputFolderName = "Perfil de ejemplo",
+                UsesLegacySession = false,
+                CreatedAtUtc = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc),
+            },
+        ]);
+
     public IReadOnlyList<UserProfile> Profiles => _profiles
         .OrderBy(profile => profile.CreatedAtUtc)
         .ToList();
@@ -103,10 +124,14 @@ internal sealed class ProfileStore
         Save();
     }
 
-    public void Save() =>
+    public void Save()
+    {
+        if (!_persistent)
+            return;
         AtomicJsonStore.Write(
             AppPaths.ProfilesFile,
             new ProfileDocument { Profiles = _profiles });
+    }
 
     private static bool IsValid(UserProfile profile) =>
         !string.IsNullOrWhiteSpace(profile.Alias) &&

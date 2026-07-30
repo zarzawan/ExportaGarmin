@@ -12,7 +12,7 @@ namespace GarminDataExport.Launcher;
 internal sealed class MainForm : Form
 {
     private const string RepairInstallationMessage =
-        "La instalación no está completa. Vuelve a extraer el ZIP de EntrenaIA. " +
+        "La instalación no está completa. Vuelve a extraer el ZIP de ExportaGarmin. " +
         "Si trabajas desde el código fuente, ejecuta Instalar.bat.";
 
     private static readonly (string Original, string Translation)[] SectionTranslations =
@@ -39,7 +39,8 @@ internal sealed class MainForm : Form
         ("Data Quality", "Calidad de los datos"),
     ];
 
-    private readonly ProfileStore _profileStore = new();
+    private readonly ProfileStore _profileStore;
+    private readonly string? _readmePreviewMode;
     private LauncherSettings _settings = new();
     private BackendCapabilities? _capabilities;
     private UserProfile? _activeProfile;
@@ -78,25 +79,42 @@ internal sealed class MainForm : Form
     private string? _verifiedSessionProfileId;
     private List<string> _lastOutputFiles = [];
 
-    public MainForm()
+    public MainForm() : this(null)
     {
-        Text = "EntrenaIA — Exportador de Garmin para IA";
+    }
+
+    internal MainForm(string? readmePreviewMode)
+    {
+        _readmePreviewMode = readmePreviewMode;
+        _profileStore = readmePreviewMode is null
+            ? new ProfileStore()
+            : ProfileStore.CreateReadmePreview();
+        Text = "ExportaGarmin — Tus datos de Garmin, ordenados y preparados para la IA";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(920, 720);
         Size = new Size(1030, 810);
         Font = new Font("Segoe UI", 10F);
 
-        LoadSettings();
         BuildInterface();
-        LocateProject();
-        ApplySettingsToControls();
-        PopulateProfiles();
+        if (_readmePreviewMode is null)
+        {
+            LoadSettings();
+            LocateProject();
+            ApplySettingsToControls();
+            PopulateProfiles();
+        }
+        else
+        {
+            ConfigureReadmePreview();
+        }
         FormClosing += MainForm_FormClosing;
     }
 
     protected override async void OnShown(EventArgs e)
     {
         base.OnShown(e);
+        if (_readmePreviewMode is not null)
+            return;
         ShowStorageRecoveryNotices();
         await DetectBackendAsync();
         if (_capabilities?.IsReady != true)
@@ -187,14 +205,14 @@ internal sealed class MainForm : Form
         titles.Controls.Add(new Label
         {
             AutoSize = true,
-            Text = "EntrenaIA",
+            Text = "ExportaGarmin",
             Font = new Font("Segoe UI", 19F, FontStyle.Bold),
             Location = new Point(0, 0),
         });
         titles.Controls.Add(new Label
         {
             AutoSize = true,
-            Text = "Exportador no oficial y no afiliado a Garmin: prepara tus datos para una IA.",
+            Text = "Tus datos de Garmin, ordenados y preparados para la IA.",
             ForeColor = SystemColors.GrayText,
             Location = new Point(2, 42),
         });
@@ -1225,7 +1243,7 @@ internal sealed class MainForm : Form
             throw new InvalidOperationException("No se encontró el proyecto.");
         var backend = BackendPaths.TryResolve(_projectRoot)
             ?? throw new InvalidOperationException(
-                "No se encontró la instalación completa de EntrenaIA.");
+                "No se encontró la instalación completa de ExportaGarmin.");
         var startInfo = new ProcessStartInfo
         {
             FileName = backend.PythonPath,
@@ -1833,7 +1851,7 @@ internal sealed class MainForm : Form
             return;
         _status.Text = "No se encontró la instalación completa.";
         _runButton.Enabled = false;
-        _sessionStatus.Text = "Vuelve a extraer EntrenaIA";
+        _sessionStatus.Text = "Vuelve a extraer ExportaGarmin";
     }
 
     private void LoadSettings()
@@ -1888,6 +1906,8 @@ internal sealed class MainForm : Form
 
     private void SaveSettings()
     {
+        if (_readmePreviewMode is not null)
+            return;
         if (_reviewWeeks.IsHandleCreated)
             _settings.ReviewWeeks = (int)_reviewWeeks.Value;
         if (_formatCombo.SelectedItem is FormatChoice format)
@@ -1928,7 +1948,7 @@ internal sealed class MainForm : Form
         MessageBox.Show(
             this,
             message,
-            "EntrenaIA",
+            "ExportaGarmin",
             MessageBoxButtons.OK,
             MessageBoxIcon.Error);
     }
@@ -1948,6 +1968,8 @@ internal sealed class MainForm : Form
 
     private void MainForm_FormClosing(object? sender, FormClosingEventArgs e)
     {
+        if (_readmePreviewMode is not null)
+            return;
         if (SessionLoginLauncher.IsRunning)
         {
             MessageBox.Show(
@@ -1976,6 +1998,29 @@ internal sealed class MainForm : Form
             CancelCurrentOperation();
         }
         SaveSettings();
+    }
+
+    private void ConfigureReadmePreview()
+    {
+        var profile = _profileStore.Profiles.Single();
+        _activeProfile = profile;
+        _profileCombo.Items.Add(profile);
+        _profileCombo.SelectedItem = profile;
+        _verifiedSessionProfileId = profile.Id;
+        _sessionStatus.Text = "✓ sesión de demostración";
+        _sessionStatus.ForeColor = Color.DarkGreen;
+        _raceSummary.Text = "Carrera: Maratón de ejemplo · 06/12/2026";
+        _reviewWeeks.Value = 16;
+        _startDate.Value = new DateTime(2026, 4, 1);
+        _endDate.Value = new DateTime(2026, 7, 30);
+        SelectFormat("txt");
+        _runButton.Enabled = true;
+        _openFolderButton.Enabled = true;
+        _flowTabs.SelectedIndex = _readmePreviewMode == "informe" ? 2 : 0;
+        _status.Text = _readmePreviewMode == "informe"
+            ? "Elige las fechas y pulsa «Crear archivo para la IA»."
+            : "Todo preparado. Pulsa «Crear archivo para la IA».";
+        RefreshOutputPreview();
     }
 
     private enum ReportMode
