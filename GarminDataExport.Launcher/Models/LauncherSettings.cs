@@ -2,7 +2,7 @@ namespace GarminDataExport.Launcher.Models;
 
 internal sealed class LauncherSettings
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 4;
 
     public int SchemaVersion { get; set; }
     public bool FirstRunCompleted { get; set; }
@@ -21,7 +21,7 @@ internal sealed class LauncherSettings
 
         if (SchemaVersion < 1)
             OutputFormat = "txt";
-        if (SchemaVersion < 2)
+        if (SchemaVersion < 4)
             ShowTechnicalLog = true;
         SchemaVersion = CurrentSchemaVersion;
         return true;

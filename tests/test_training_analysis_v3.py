@@ -10,6 +10,7 @@ import garmin_export
 from garmin_export import (
     ExportCache,
     GarminExporter,
+    _compact_activity,
     _compact_training,
     _safe_exception_reason,
     _set_safe_call_failure_handler,
@@ -698,6 +699,25 @@ class GoalPaceExposureTests(unittest.TestCase):
 
 
 class PrivacyAuditTests(unittest.TestCase):
+    def test_privacy_allows_sport_location_but_rejects_identity(self):
+        allowed = privacy_audit(
+            {
+                "name": "Cuestas del parque",
+                "latitude": 39.123456789,
+                "longitude": -0.123456789,
+                "encodedPolyline": "abc123",
+                "locationName": "Parque ficticio",
+                "gear": {"displayName": "Zapatillas rápidas"},
+            },
+        )
+        self.assertTrue(allowed["passed"])
+        rejected = privacy_audit({"ownerFullName": "Persona ficticia"})
+        self.assertFalse(rejected["passed"])
+
+    def test_privacy_never_allows_secrets(self):
+        rejected = privacy_audit({"accessToken": "secreto-ficticio"})
+        self.assertFalse(rejected["passed"])
+
     def test_safe_local_references_pass(self):
         audit = privacy_audit({
             "activities": [{
@@ -724,13 +744,13 @@ class PrivacyAuditTests(unittest.TestCase):
             "activities[0].activityId",
             audit["forbidden_key_paths"],
         )
-        self.assertIn(
+        self.assertNotIn(
             "activities[0].latitude",
             audit["forbidden_key_paths"],
         )
         self.assertTrue(audit["forbidden_values_detected"])
 
-    def test_identity_device_location_and_url_fields_fail(self):
+    def test_identity_device_address_identifier_and_url_fields_fail(self):
         audit = privacy_audit({
             "profile": {
                 "device_id": "device-private",
@@ -750,8 +770,6 @@ class PrivacyAuditTests(unittest.TestCase):
         self.assertEqual(
             {
                 "activity.address",
-                "activity.location_name",
-                "activity.start_city",
                 "activity.workout_id",
                 "profile.birth_date",
                 "profile.device_id",
@@ -761,7 +779,7 @@ class PrivacyAuditTests(unittest.TestCase):
             set(audit["forbidden_key_paths"]),
         )
 
-    def test_short_coordinate_and_link_aliases_fail_without_false_matches(self):
+    def test_short_coordinates_are_allowed_but_links_are_removed(self):
         audit = privacy_audit({
             "private": {
                 "lat": 39.1,
@@ -778,16 +796,13 @@ class PrivacyAuditTests(unittest.TestCase):
         self.assertFalse(audit["passed"])
         self.assertEqual(
             {
-                "private.lat",
                 "private.link",
-                "private.lng",
-                "private.lon",
             },
             set(audit["forbidden_key_paths"]),
         )
 
-    def test_private_value_comparison_is_exact_but_identifiers_can_be_embedded(self):
-        audit = privacy_audit(
+    def test_private_values_and_identifiers_use_exact_comparison(self):
+        embedded = privacy_audit(
             {
                 "profile": {"timezone": "Europe/Madrid"},
                 "technical": {
@@ -798,18 +813,21 @@ class PrivacyAuditTests(unittest.TestCase):
             forbidden_identifiers=["123456789"],
         )
 
-        self.assertFalse(audit["passed"])
-        self.assertEqual([], audit["forbidden_key_paths"])
-        self.assertEqual(
-            ["123…"],
-            audit["forbidden_values_detected"],
-        )
+        self.assertTrue(embedded["passed"])
 
         exact_private_value = privacy_audit(
-            {"safe_field": "Madrid"},
+            {
+                "safe_field": "Madrid",
+                "legacy_reference": "123456789",
+            },
             forbidden_values=["Madrid"],
+            forbidden_identifiers=["123456789"],
         )
         self.assertFalse(exact_private_value["passed"])
+        self.assertEqual(
+            ["123…", "Mad…"],
+            exact_private_value["forbidden_values_detected"],
+        )
 
     def test_exception_summary_never_copies_raw_message(self):
         raw_secret = "https://sso.example.invalid?token=123456789"
@@ -918,6 +936,70 @@ class PartialExportContractTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "privacidad"):
                 exporter._finalize_semantic_model()
 
+    def test_realistic_activity_identity_is_filtered_before_final_audit(self):
+        raw = {
+            "summary": {
+                "activityId": 123456789,
+                "activityName": "Rodaje con cuestas",
+                "activityType": {"typeKey": "running"},
+                "startTimeLocal": "2026-01-10 08:00:00",
+                "ownerFullName": "Persona ficticia",
+                "ownerFirstName": "Persona",
+                "publicDisplayName": "persona_ficticia",
+                "startLatitude": 39.123456789,
+                "startLongitude": -0.123456789,
+                "distance": 10_000,
+                "duration": 3_600,
+                "elevationGain": 75,
+            },
+            "detail": {
+                "deviceSerialNumber": "SERIAL-FICTICIO-123",
+                "primaryUnitId": 987654321,
+                "summaryDTO": {},
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            exporter = GarminExporter(
+                api=Mock(),
+                out_dir=root,
+                days=7,
+                max_activities=10,
+                cache=ExportCache(
+                    root,
+                    enabled=False,
+                    cache_dir=root / ".cache",
+                ),
+                explicit_start_date=date(2026, 1, 5),
+                explicit_end_date=date(2026, 1, 11),
+            )
+            exporter._remember_sensitive_payload(raw)
+            exporter.sensitive_identifiers.add("123456789")
+            activity = _compact_activity(
+                raw,
+                reference_secret=exporter.reference_secret,
+            )
+            exporter.compact_activities = [activity]
+            exporter.semantic_model = {
+                "export_metadata": {},
+                "activities": [activity],
+            }
+
+            exporter._finalize_semantic_model()
+
+        source = activity["source_activity_data"]
+        self.assertNotIn("activityId", source["summary"])
+        self.assertNotIn("ownerFirstName", source["summary"])
+        self.assertNotIn("publicDisplayName", source["summary"])
+        self.assertNotIn("detail", source)
+        self.assertEqual(
+            39.123456789,
+            activity["coordinates"]["start"]["latitude"],
+        )
+        self.assertTrue(
+            exporter.semantic_model["data_quality"]["privacy_audit"]["passed"]
+        )
+
     def test_safe_call_failure_marks_semantic_export_partial_without_raw_message(self):
         raw_message = "https://private.invalid?token=secret-value"
         with tempfile.TemporaryDirectory() as directory:
@@ -1021,6 +1103,24 @@ class TrainingMetricDateTests(unittest.TestCase):
 
 
 class QualityPreservationTests(unittest.TestCase):
+    def test_quality_report_records_automatic_privacy(self):
+        quality = build_quality_report(
+            [],
+            [],
+            date(2026, 1, 1),
+            date(2026, 1, 1),
+        )
+        self.assertEqual(
+            "redact_personal_identifiers",
+            quality["privacy"]["mode"],
+        )
+        self.assertTrue(
+            quality["privacy"]["coordinates_and_locations_exported"]
+        )
+        self.assertTrue(
+            quality["privacy"]["activity_titles_exported_by_default"]
+        )
+
     def test_legacy_warnings_and_missing_critical_data_are_preserved(self):
         quality = build_quality_report(
             [],
@@ -1119,7 +1219,9 @@ class XlsxContractTests(unittest.TestCase):
             "blood_pressure": [],
             "body_composition": [],
             "training_metrics": {},
-            "data_quality": {"privacy": {"mode": "strict"}},
+            "data_quality": {
+                "privacy": {"mode": "redact_personal_identifiers"}
+            },
         }
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory) / "informe_anonimo.xlsx"

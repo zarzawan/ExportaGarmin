@@ -274,9 +274,11 @@ class ActivityDetailsTests(unittest.TestCase):
         activity = self._export_activity(True)
         self.assertIn("activity_series", activity)
         series = activity["activity_series"]
-        self.assertEqual(1, len(series["metric_descriptors"]))
-        self.assertEqual(1, len(series["samples"][0]))
-        self.assertNotIn("Latitude", json.dumps(series))
+        self.assertEqual(2, len(series["metric_descriptors"]))
+        self.assertEqual(2, len(series["samples"][0]))
+        self.assertIn("latitude_deg", {
+            item["field"] for item in series["metric_descriptors"]
+        })
 
     def test_missing_cached_series_is_downloaded_when_details_are_requested(self):
         api = Mock()

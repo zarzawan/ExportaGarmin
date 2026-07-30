@@ -2069,12 +2069,12 @@ def build_quality_report(
         ),
         "warnings": legacy_quality.get("warnings", []) or [],
         "privacy": {
-            "mode": "strict",
+            "mode": "redact_personal_identifiers",
             "garmin_activity_ids_exported": False,
             "garmin_gear_ids_exported": False,
-            "activity_titles_exported_by_default": False,
+            "activity_titles_exported_by_default": True,
             "exact_activity_times_exported_by_default": False,
-            "coordinates_and_locations_exported": False,
+            "coordinates_and_locations_exported": True,
             "credentials_or_tokens_exported": False,
             "raw_cache_is_private_and_not_part_of_export": True,
         },
@@ -2159,86 +2159,100 @@ def activity_catalog_entry(
     })
 
 
+_PERSONAL_KEY_PARTS = (
+    "activityid",
+    "applicationkey",
+    "authid",
+    "deviceid",
+    "gearid",
+    "ownerid",
+    "profileid",
+    "sessionid",
+    "unitid",
+    "userid",
+    "uuid",
+    "profilepk",
+    "userpk",
+    "userprofilepk",
+    "userprofilenumber",
+    "serialnumber",
+    "address",
+    "streetaddress",
+    "postalcode",
+    "postcode",
+    "fullname",
+    "firstname",
+    "lastname",
+    "ownerdisplayname",
+    "ownername",
+    "publicdisplayname",
+    "username",
+    "birthdate",
+    "dateofbirth",
+    "profileimage",
+    "photourl",
+    "imageurl",
+    "url",
+    "href",
+    "token",
+    "cookie",
+    "password",
+    "email",
+    "phone",
+)
+_IDENTITY_PARENT_KEYS = {
+    "account",
+    "owner",
+    "profile",
+    "userdata",
+    "userprofile",
+}
+
+
+def is_personal_data_key(key: Any, parents: Iterable[Any] = ()) -> bool:
+    """Clasifica claves personales igual para el filtrado y para la auditoría."""
+    normal = _normal_key(key)
+    if normal in {"activityref", "gearref"}:
+        return False
+    if normal == "link":
+        return True
+    parent_keys = {_normal_key(parent) for parent in parents}
+    if (
+        normal == "displayname"
+        and bool(parent_keys & _IDENTITY_PARENT_KEYS)
+    ):
+        return True
+    if any(part in normal for part in _PERSONAL_KEY_PARTS):
+        return True
+    has_identifier_suffix = bool(
+        re.search(r"(?:^|[_-])(?:id|uuid)$", str(key), re.IGNORECASE)
+        or re.search(r"(?:Id|ID|Uuid|UUID)$", str(key))
+    )
+    return has_identifier_suffix
+
+
 def privacy_audit(
     model: dict,
     forbidden_values: Optional[Iterable[Any]] = None,
     forbidden_identifiers: Optional[Iterable[Any]] = None,
 ) -> dict:
-    """Comprueba el contrato estructural antes de escribir un artefacto."""
-    forbidden_exact_keys = {
-        "lat",
-        "link",
-        "lng",
-        "lon",
-    }
-    forbidden_key_parts = (
-        "activityid",
-        "gearid",
-        "userid",
-        "profileid",
-        "deviceid",
-        "unitid",
-        "ownerid",
-        "uuid",
-        "profilepk",
-        "userpk",
-        "userprofilepk",
-        "userprofilenumber",
-        "applicationkey",
-        "serialnumber",
-        "latitude",
-        "longitude",
-        "coordinate",
-        "polyline",
-        "location",
-        "startcity",
-        "endcity",
-        "address",
-        "streetaddress",
-        "postalcode",
-        "postcode",
-        "displayname",
-        "fullname",
-        "firstname",
-        "lastname",
-        "ownername",
-        "username",
-        "birthdate",
-        "dateofbirth",
-        "profileimage",
-        "photourl",
-        "imageurl",
-        "url",
-        "href",
-        "token",
-        "cookie",
-        "password",
-        "email",
-    )
+    """Comprueba la única política: ocultar identidad y conservar deporte."""
     key_violations: list[str] = []
     scalar_values: list[str] = []
 
-    def visit(value: Any, path: str = ""):
+    def visit(value: Any, path: str = "", parents: tuple[str, ...] = ()):
         if isinstance(value, dict):
             for key, nested in value.items():
-                normal = _normal_key(key)
-                raw_key = str(key)
-                identifier_suffix = bool(
-                    re.search(r"(?:^|[_-])(?:id|uuid)$", raw_key, re.IGNORECASE)
-                    or re.search(r"(?:Id|ID|Uuid|UUID)$", raw_key)
+                if is_personal_data_key(key, parents):
+                    key_violations.append(f"{path}.{key}".strip("."))
+                visit(
+                    nested,
+                    f"{path}.{key}".strip("."),
+                    (*parents, str(key)),
                 )
-                if (
-                    normal in forbidden_exact_keys
-                    or any(part in normal for part in forbidden_key_parts)
-                    or identifier_suffix
-                ):
-                    # Las referencias locales son deliberadamente seguras.
-                    if normal not in {"activityref", "gearref"}:
-                        key_violations.append(f"{path}.{key}".strip("."))
-                visit(nested, f"{path}.{key}".strip("."))
         elif isinstance(value, list):
             for index, nested in enumerate(value):
-                visit(nested, f"{path}[{index}]")
+                visit(nested, f"{path}[{index}]", parents)
         elif value is not None:
             scalar_values.append(str(value))
 
@@ -2252,7 +2266,7 @@ def privacy_audit(
         candidate = str(raw)
         if (
             len(candidate) >= 6
-            and any(candidate in scalar for scalar in scalar_values)
+            and candidate in scalar_values
         ):
             value_violations.append(candidate[:3] + "…")
     return {
@@ -2551,6 +2565,13 @@ def render_xlsx(model: dict, path: Path) -> None:
         {"paso": 5, "instruccion": "Las celdas vacías significan dato ausente, no cero."},
         {"paso": 6, "instruccion": f"Esquema: {metadata.get('schema_version', SCHEMA_VERSION)}."},
         {"paso": 7, "instruccion": series_export_note},
+        {
+            "paso": 8,
+            "instruccion": (
+                "La fuente original completa de las actividades solo se conserva "
+                "en el TXT; Excel mantiene los campos deportivos normalizados."
+            ),
+        },
     ]
     add_table("LEEME", readme_rows)
 
@@ -2594,7 +2615,8 @@ def render_xlsx(model: dict, path: Path) -> None:
             key: value
             for key, value in activity.items()
             if key not in {
-                "laps", "hr_zones", "power_zones", "gear", "activity_series"
+                "laps", "hr_zones", "power_zones", "gear", "activity_series",
+                "source_activity_data",
             }
         }))
         reference = activity.get("activity_ref")

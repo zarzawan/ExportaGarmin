@@ -51,6 +51,7 @@ from training_analysis import (
     atomic_write_text,
     build_quality_report,
     build_report_extensions,
+    is_personal_data_key,
     load_local_json,
     load_or_create_reference_secret,
     normalise_journal,
@@ -859,6 +860,85 @@ def _sanitize_compact(data, remove_free_text=False):
     return data
 
 
+_OPTIONAL_ACTIVITY_TEXT_KEYS = {
+    "comment",
+    "comments",
+    "description",
+    "note",
+    "notes",
+    "starttime",
+    "starttimegmt",
+    "starttimelocal",
+    "endtime",
+    "endtimegmt",
+    "endtimelocal",
+}
+
+
+def _activity_source_data(
+    data,
+    include_free_text=False,
+    parents=(),
+):
+    """Conserva la fuente deportiva y retira identidad e identificadores."""
+    if isinstance(data, dict):
+        cleaned = {}
+        for key, value in data.items():
+            if str(key).startswith("_"):
+                continue
+            normal = re.sub(r"[^a-z0-9]", "", str(key).lower())
+            if not include_free_text and normal in _OPTIONAL_ACTIVITY_TEXT_KEYS:
+                continue
+            if is_personal_data_key(key, parents):
+                continue
+            cleaned[key] = _activity_source_data(
+                value,
+                include_free_text,
+                (*parents, normal),
+            )
+        return cleaned
+    if isinstance(data, list):
+        return [
+            _activity_source_data(item, include_free_text, parents)
+            for item in data
+        ]
+    return data
+
+
+def _source_metrics(data, *terms):
+    """Devuelve campos originales relevantes sin inventar unidades."""
+    if not isinstance(data, dict):
+        return {}
+    result = {}
+    for key, value in data.items():
+        normal = re.sub(r"[^a-z0-9]", "", str(key).lower())
+        if any(term in normal for term in terms):
+            result[str(key)] = value
+    return result
+
+
+def _route_geometry(data):
+    """Recoge geometría de ruta con su ruta de origen, sin modificar valores."""
+    found = {}
+
+    def visit(value, path=""):
+        if not isinstance(value, dict):
+            return
+        for key, nested in value.items():
+            key_path = f"{path}.{key}".strip(".")
+            normal = re.sub(r"[^a-z0-9]", "", str(key).lower())
+            if (
+                "polyline" in normal
+                or normal in {"encodedpath", "geometry", "map", "route", "track"}
+            ):
+                found[key_path] = nested
+            elif isinstance(nested, dict):
+                visit(nested, key_path)
+
+    visit(data)
+    return found
+
+
 def _compact_profile(data, period_end, timezone_name=None):
     """Crea el perfil reducido y privado del compacto semántico."""
     user_profile = data.get("user_profile") if isinstance(data, dict) else {}
@@ -1292,6 +1372,29 @@ def _normalise_laps(activity_data, include_exact_times=False):
             continue
         speed = _pick(lap, "averageMovingSpeed", "averageSpeed")
         max_speed = _pick(lap, "maxSpeed")
+        gap_speed = _pick(
+            lap,
+            "averageGradeAdjustedSpeed",
+            "avgGradeAdjustedSpeed",
+            "gradeAdjustedSpeed",
+        )
+        elevation_gain = _number(_pick(lap, "elevationGain", "totalAscent", "ascent"))
+        elevation_loss = _number(_pick(lap, "elevationLoss", "totalDescent", "descent"))
+        start_elevation = _number(
+            _pick(lap, "startElevation", "startingElevation", "startAltitude")
+        )
+        end_elevation = _number(
+            _pick(lap, "endElevation", "endingElevation", "endAltitude")
+        )
+        elevation_net = (
+            end_elevation - start_elevation
+            if start_elevation is not None and end_elevation is not None
+            else (
+                elevation_gain - elevation_loss
+                if elevation_gain is not None and elevation_loss is not None
+                else None
+            )
+        )
         result.append(_strip_empty({
             "lap_index": _number(_pick(lap, "lapIndex", "messageIndex")) or index,
             "lap_type": _pick(lap, "type"),
@@ -1317,7 +1420,31 @@ def _normalise_laps(activity_data, include_exact_times=False):
             "average_vertical_oscillation_cm": _number(
                 _pick(lap, "verticalOscillation")
             ),
-            "elevation_gain_m": _number(_pick(lap, "elevationGain")),
+            "elevation_gain_m": elevation_gain,
+            "elevation_loss_m": elevation_loss,
+            "elevation_net_change_m": elevation_net,
+            "elevation_net_change_method": (
+                "end_minus_start"
+                if start_elevation is not None and end_elevation is not None
+                else "ascent_minus_descent"
+                if elevation_net is not None
+                else None
+            ),
+            "start_elevation_m": start_elevation,
+            "end_elevation_m": end_elevation,
+            "minimum_elevation_m": _number(
+                _pick(lap, "minElevation", "minimumElevation", "minAltitude")
+            ),
+            "maximum_elevation_m": _number(
+                _pick(lap, "maxElevation", "maximumElevation", "maxAltitude")
+            ),
+            "grade_adjusted_pace_s_per_km": _pace_from_speed(gap_speed),
+            "grade_adjusted_pace_source": _source_metrics(
+                lap,
+                "gradeadjusted",
+                "gap",
+                "rap",
+            ),
         }))
     return _mark_partial_last_lap(result), source_name
 
@@ -1336,13 +1463,18 @@ _ACTIVITY_SERIES_KEYS = {
     "directStrideLength": "stride_length_raw",
     "directElevation": "elevation_raw",
     "directEnhancedElevation": "elevation_raw",
+    "directGrade": "grade_raw",
+    "directGradeAdjustedPace": "grade_adjusted_pace_raw",
+    "directGradeAdjustedSpeed": "grade_adjusted_speed_raw",
+    "directLatitude": "latitude_deg",
+    "directLongitude": "longitude_deg",
     "directTemperature": "temperature_raw",
 }
 _MAX_ACTIVITY_CHART_POINTS = 100_000
 
 
 def _compact_activity_series(details, diagnostics=None):
-    """Conserva la resolución máxima sin coordenadas ni columnas desconocidas."""
+    """Conserva series deportivas aprobadas, incluido el GPS disponible."""
     diagnostics = diagnostics if diagnostics is not None else []
     if not isinstance(details, dict):
         return None
@@ -1773,7 +1905,10 @@ def _compact_activity(
 
     diagnostics = []
     activity_series = (
-        _compact_activity_series(activity_data.get("details"), diagnostics)
+        _compact_activity_series(
+            activity_data.get("details"),
+            diagnostics,
+        )
         if include_series
         else None
     )
@@ -1781,6 +1916,29 @@ def _compact_activity(
         for message in diagnostics:
             quality_callback("series_validation_errors", message)
 
+    start_elevation = _number(
+        _pick(sources, "startElevation", "startingElevation", "startAltitude")
+    )
+    end_elevation = _number(
+        _pick(sources, "endElevation", "endingElevation", "endAltitude")
+    )
+    elevation_gain = _number(_pick(sources, "elevationGain", "totalAscent"))
+    elevation_loss = _number(_pick(sources, "elevationLoss", "totalDescent"))
+    elevation_net = (
+        end_elevation - start_elevation
+        if start_elevation is not None and end_elevation is not None
+        else (
+            elevation_gain - elevation_loss
+            if elevation_gain is not None and elevation_loss is not None
+            else None
+        )
+    )
+    gap_speed = _pick(
+        sources,
+        "averageGradeAdjustedSpeed",
+        "avgGradeAdjustedSpeed",
+        "gradeAdjustedSpeed",
+    )
     result = {
         "activity_ref": private_reference(
             "activity",
@@ -1792,7 +1950,12 @@ def _compact_activity(
         "start_time_local": start_local if include_free_text else None,
         "sport": _pick(activity_type, "typeKey"),
         "garmin_event_type": event_type,
-        "name": _pick(summary, "activityName") if include_free_text else None,
+        "name": _pick(sources, "activityName", "name", "title"),
+        "description": (
+            _pick(sources, "description", "activityDescription", "note", "notes")
+            if include_free_text
+            else None
+        ),
         "distance_m": _number(_pick(sources, "distance")),
         "duration_s": duration_s,
         "elapsed_duration_s": _number(_pick(sources, "elapsedDuration")),
@@ -1823,8 +1986,47 @@ def _compact_activity(
         "average_vertical_oscillation_cm": _number(
             _pick(sources, "verticalOscillation")
         ),
-        "elevation_gain_m": _number(_pick(sources, "elevationGain")),
-        "elevation_loss_m": _number(_pick(sources, "elevationLoss")),
+        "elevation_gain_m": elevation_gain,
+        "elevation_loss_m": elevation_loss,
+        "elevation_net_change_m": elevation_net,
+        "elevation_net_change_method": (
+            "end_minus_start"
+            if start_elevation is not None and end_elevation is not None
+            else "ascent_minus_descent"
+            if elevation_net is not None
+            else None
+        ),
+        "start_elevation_m": start_elevation,
+        "end_elevation_m": end_elevation,
+        "minimum_elevation_m": _number(
+            _pick(sources, "minElevation", "minimumElevation", "minAltitude")
+        ),
+        "maximum_elevation_m": _number(
+            _pick(sources, "maxElevation", "maximumElevation", "maxAltitude")
+        ),
+        "grade_adjusted_pace_s_per_km": _pace_from_speed(gap_speed),
+        "grade_adjusted_pace_source": {
+            **_source_metrics(summary, "gradeadjusted", "gap", "rap"),
+            **_source_metrics(dto, "gradeadjusted", "gap", "rap"),
+        },
+        "coordinates": _strip_empty({
+            "start": _strip_empty({
+                "latitude": _number(_pick(sources, "startLatitude", "startLat")),
+                "longitude": _number(_pick(sources, "startLongitude", "startLon")),
+            }),
+            "end": _strip_empty({
+                "latitude": _number(_pick(sources, "endLatitude", "endLat")),
+                "longitude": _number(_pick(sources, "endLongitude", "endLon")),
+            }),
+        }),
+        "route_geometry": _activity_source_data(
+            _route_geometry({
+                key: value
+                for key, value in activity_data.items()
+                if key != "details"
+            }),
+            include_free_text=include_free_text,
+        ),
         "average_temperature_c": temperature.get("temperature_c"),
         "average_temperature_raw": temperature.get("temperature_raw"),
         "average_temperature_source_unit": temperature.get(
@@ -1862,6 +2064,18 @@ def _compact_activity(
             include_free_text=include_free_text,
         ),
         "activity_series": activity_series,
+        "source_activity_data": _activity_source_data(
+            (
+                activity_data
+                if include_series
+                else {
+                    key: value
+                    for key, value in activity_data.items()
+                    if key != "details"
+                }
+            ),
+            include_free_text=include_free_text,
+        ),
     }
     return _strip_empty(result)
 
@@ -2950,7 +3164,7 @@ class GarminExporter:
                  report_type: str = "history",
                  race_context: Optional[dict] = None,
                  journal: Optional[list] = None,
-                 review_weeks: Optional[int] = None,
+                  review_weeks: Optional[int] = None,
                   selected_activity_ref: Optional[str] = None,
                   include_free_text: bool = False,
                   manifest_path: Optional[Path] = None,
@@ -3003,15 +3217,7 @@ class GarminExporter:
             "temporal_warnings": [],
             "current_snapshots_detected": [],
             "unit_conversions": [],
-            "privacy_filters_applied": [
-                "Se excluyeron nombres completos e identificadores de usuario.",
-                "Se excluyeron coordenadas, polilíneas y ubicaciones.",
-                "Se excluyeron números de serie e identificadores de dispositivos.",
-                "Se excluyeron hábitos íntimos del registro de estilo de vida.",
-                "Los identificadores de actividades y equipamiento se sustituyeron por referencias locales.",
-                "Los títulos y horas exactas de actividades se omitieron salvo consentimiento explícito.",
-                "Los nombres y modelos de equipamiento se conservan para interpretar las actividades; el texto personalizado se marca como user_provided.",
-            ],
+            "privacy_filters_applied": self._privacy_filter_descriptions(),
             "duplicate_sources_removed": [],
         }
 
@@ -3039,6 +3245,14 @@ class GarminExporter:
     def _range_cache_key(self, section_name: str) -> str:
         """Separa las cachés dependientes de fechas por intervalo inclusivo."""
         return f"{section_name}_{self.start_date}_{self.today}"
+
+    def _privacy_filter_descriptions(self):
+        return [
+            "Las credenciales, tokens y cookies nunca se incorporan desde el almacén de sesión.",
+            "Los títulos de actividades y todas las métricas deportivas derivadas se conservan.",
+            "Se eliminan identidad, contacto, direcciones e identificadores personales de la fuente.",
+            "Se conservan coordenadas, ubicaciones deportivas, tracks y polilíneas.",
+        ]
 
     def _quality_add(self, category, message):
         values = self.data_quality.setdefault(category, [])
@@ -3096,60 +3310,12 @@ class GarminExporter:
 
     def _remember_sensitive_payload(self, payload):
         """Recuerda valores privados observados para comprobar la salida final."""
-        sensitive_keys = {
-            "fullname",
-            "firstname",
-            "lastname",
-            "ownerfullname",
-            "ownerdisplayname",
-            "publicdisplayname",
-            "username",
-            "email",
-            "birthdate",
-            "dateofbirth",
-            "serialnumber",
-            "address",
-            "streetaddress",
-            "postalcode",
-            "postcode",
-            "city",
-            "startcity",
-            "endcity",
-            "location",
-            "latitude",
-            "longitude",
-            "profileimage",
-            "photourl",
-            "imageurl",
-            "url",
-        }
-
         def visit(value, parents=()):
             if isinstance(value, dict):
                 for key, nested in value.items():
                     normal = re.sub(r"[^a-z0-9]", "", str(key).lower())
-                    is_identifier = (
-                        normal.endswith("uuid")
-                        or (
-                            normal.endswith("id")
-                            and normal not in {"fluid", "solid", "valid"}
-                        )
-                        or normal in {
-                            "profilepk",
-                            "userpk",
-                            "userprofilepk",
-                            "userprofilenumber",
-                        }
-                    )
-                    is_user_display_name = (
-                        normal == "displayname"
-                        and any(
-                            parent in {"userdata", "userprofile", "profile"}
-                            for parent in parents
-                        )
-                    )
                     if (
-                        (is_identifier or normal in sensitive_keys or is_user_display_name)
+                        is_personal_data_key(key, parents)
                         and not isinstance(nested, (dict, list, bool))
                         and nested is not None
                     ):
@@ -3220,6 +3386,72 @@ class GarminExporter:
             if isinstance(activity, dict):
                 exported_gear.extend(_as_list(activity.get("gear")))
         privacy = quality.setdefault("privacy", {})
+        privacy.update({
+            "mode": "redact_personal_identifiers",
+            "garmin_activity_ids_exported": False,
+            "garmin_gear_ids_exported": False,
+            "activity_titles_exported_by_default": True,
+            "exact_activity_times_exported_by_default": (
+                self.include_free_text
+            ),
+            "coordinates_and_locations_exported": True,
+            "titles_preserved": True,
+            "coordinates_preserved_when_available": True,
+            "altitude_profiles_preserved_when_available": True,
+            "complete_laps_and_splits_preserved_when_available": True,
+            "fields_preserved": [
+                "activity_titles",
+                "sports_metrics",
+                "altitude_and_elevation_profiles",
+                "laps_and_splits",
+                "grade_adjusted_pace",
+                "coordinates",
+                "tracks",
+                "sport_locations",
+                "polylines",
+            ],
+            "fields_removed": [
+                "credentials",
+                "tokens",
+                "cookies",
+                "personal_identity",
+                "personal_contact",
+                "personal_addresses",
+                "personal_identifiers",
+            ] + (
+                []
+                if self.include_free_text
+                else ["activity_descriptions_notes_and_exact_times"]
+            ),
+            "transformations_applied": ["personal_fields_redacted"],
+        })
+        exported_series_fields = {
+            descriptor.get("field")
+            for activity in self.compact_activities
+            if isinstance(activity, dict)
+            for descriptor in (
+                (activity.get("activity_series") or {}).get(
+                    "metric_descriptors",
+                    [],
+                )
+            )
+            if isinstance(descriptor, dict)
+        }
+        privacy["coordinates_present_in_export"] = any(
+            isinstance(activity, dict) and bool(activity.get("coordinates"))
+            for activity in self.compact_activities
+        ) or bool({"latitude_deg", "longitude_deg"} & exported_series_fields)
+        privacy["titles_present_in_export"] = any(
+            isinstance(activity, dict) and bool(activity.get("name"))
+            for activity in self.compact_activities
+        )
+        privacy["altitude_profiles_present_in_export"] = bool(
+            {"elevation_raw"} & exported_series_fields
+        )
+        privacy["laps_or_splits_present_in_export"] = any(
+            isinstance(activity, dict) and bool(activity.get("laps"))
+            for activity in self.compact_activities
+        )
         privacy["gear_names_exported"] = any(
             isinstance(item, dict) and bool(item.get("gear_name"))
             for item in exported_gear
@@ -3281,27 +3513,19 @@ class GarminExporter:
             forbidden_values=private_values,
             forbidden_identifiers=identifier_values,
         )
-        if not self.include_free_text:
-            title_values = [
-                value
-                for value in self.sensitive_activity_names
-                if len(value.strip()) >= 12
-            ]
-            title_audit = privacy_audit(
-                {"activities": self.compact_activities},
-                forbidden_values=title_values,
-            )
-            audit["passed"] = audit["passed"] and title_audit["passed"]
-            audit["forbidden_key_paths"] = sorted(set(
-                audit["forbidden_key_paths"]
-                + title_audit["forbidden_key_paths"]
-            ))
-            audit["forbidden_values_detected"] = sorted(set(
-                audit["forbidden_values_detected"]
-                + title_audit["forbidden_values_detected"]
-            ))
         quality["privacy_audit"] = audit
         if not audit.get("passed"):
+            paths = audit.get("forbidden_key_paths", [])
+            if paths:
+                log.error(
+                    "La auditoría encontró campos personales sin filtrar en: "
+                    + ", ".join(paths[:8])
+                )
+            if audit.get("forbidden_values_detected"):
+                log.error(
+                    "La auditoría encontró valores personales o identificadores "
+                    "en campos que debían estar filtrados."
+                )
             raise RuntimeError(
                 "La comprobación de privacidad detectó campos no permitidos; "
                 "no se ha escrito ningún archivo."
@@ -3578,6 +3802,10 @@ class GarminExporter:
             log.info(f"Modo: actualización (datos nuevos desde {self.update_base_date})")
         if _compact_mode:
             log.info("Modo: compacto (archivo más pequeño para herramientas de IA)")
+            log.info(
+                "Privacidad: identidad e identificadores personales ocultos "
+                "automáticamente"
+            )
             if self.include_activity_details:
                 log.info("Actividades: se incluirá el máximo detalle temporal registrado")
         if _split_mode:
@@ -3622,7 +3850,7 @@ class GarminExporter:
                 else "series temporales de actividad omitidas"
             )
             self.md.append(
-                f"Formato: compacto semántico (campos seleccionados y privados, "
+                "Formato: compacto semántico (identidad oculta automáticamente, "
                 f"JSON en una línea, {activity_detail_note})"
             )
             self.md.append(
@@ -4083,6 +4311,7 @@ class GarminExporter:
                 else "compact_summary"
             ),
             "free_text_included": self.include_free_text,
+            "privacy_mode": "redact_personal_identifiers",
             "schema_version": _COMPACT_SCHEMA_VERSION,
         }
         self._remember_compact("export_metadata", metadata)
@@ -4696,11 +4925,10 @@ class GarminExporter:
                 self.compact_activities = list(all_activities)
                 self._remember_compact("activities", all_activities)
                 self.md.append(
-                    'Schema: "Actividades normalizadas y privadas. Se conservan todas '
-                    'las actividades y vueltas; se eliminan fuentes duplicadas, datos '
-                    'del propietario y coordenadas. Se incluyen equipamiento y '
-                    'autoevaluación cuando existen. Las series son opcionales y solo '
-                    'contienen métricas deportivas aprobadas."\n'
+                    'Schema: "Actividades normalizadas con título, elevación, desnivel, '
+                    'GAP/RAP, vueltas, zonas, equipamiento y autoevaluación. El GPS, '
+                    'track, ubicaciones y fuente original dependen del modo de privacidad; '
+                    'las métricas deportivas derivadas se conservan siempre."\n'
                 )
                 self.md.append(f"{_json(all_activities)}\n")
                 self._quality_add(
@@ -5679,7 +5907,7 @@ Inicio de sesión:
     parser.add_argument(
         "--include-free-text",
         action="store_true",
-        help="Incluir títulos y textos libres mediante consentimiento explícito",
+        help="Incluir descripciones, notas y otros textos libres mediante consentimiento explícito",
     )
     parser.add_argument(
         "--activity-id",

@@ -61,6 +61,7 @@ internal sealed class MainForm : Form
     private readonly CheckBox _historyActivityDetails = new();
     private readonly ComboBox _formatCombo = new();
     private readonly Label _formatNotice = new();
+    private readonly Label _privacyNotice = new();
     private readonly Label _outputPreview = new();
     private readonly Label _status = new();
     private readonly ProgressBar _progress = new();
@@ -393,8 +394,8 @@ internal sealed class MainForm : Form
         });
         layout.Controls.Add(new Label
         {
-            Text = "Elige una actividad reciente. Se conservará la máxima resolución temporal disponible " +
-                   "sin coordenadas. Garmin puede usar grabación inteligente, por lo que no siempre hay un punto por segundo.",
+            Text = "Elige una actividad reciente. Se conservará la máxima resolución temporal disponible. " +
+                   "El GPS depende del modo de privacidad. Garmin puede usar grabación inteligente, por lo que no siempre hay un punto por segundo.",
             AutoSize = true,
             MaximumSize = new Size(850, 0),
             Margin = new Padding(0, 0, 0, 18),
@@ -523,6 +524,26 @@ internal sealed class MainForm : Form
         _formatNotice.ForeColor = SystemColors.GrayText;
         _formatNotice.Margin = new Padding(10, 7, 0, 0);
         bar.Controls.Add(_formatNotice);
+        bar.SetFlowBreak(_formatNotice, true);
+        bar.Controls.Add(new Label
+        {
+            Text = "Privacidad automática:",
+            AutoSize = true,
+            Font = new Font(Font, FontStyle.Bold),
+            Margin = new Padding(0, 12, 8, 0),
+        });
+        bar.Controls.Add(new Label
+        {
+            Text = "Oculta identidad y conserva los datos deportivos",
+            AutoSize = true,
+            Margin = new Padding(0, 12, 0, 0),
+        });
+        _privacyNotice.AutoSize = true;
+        _privacyNotice.ForeColor = SystemColors.GrayText;
+        _privacyNotice.Margin = new Padding(10, 12, 0, 0);
+        _privacyNotice.Text =
+            "Conserva GPS exacto, que puede revelar dónde entrenas. Revisa el archivo antes de compartirlo.";
+        bar.Controls.Add(_privacyNotice);
         return bar;
     }
 
@@ -1113,6 +1134,7 @@ internal sealed class MainForm : Form
             AppendLog($"Tipo: {ModeDisplayName(mode)}");
             AppendLog($"Intervalo: {start:yyyy-MM-dd} a {end:yyyy-MM-dd}");
             AppendLog($"Formato: {format}");
+            AppendLog("Privacidad: identidad e identificadores personales ocultos automáticamente");
             AppendLog("Destino: carpeta del perfil dentro de Documentos.");
             AppendLog("Las credenciales no se incluyen en el archivo.");
 

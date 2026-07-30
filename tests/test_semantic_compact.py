@@ -24,7 +24,9 @@ from garmin_export import (
     _relative_manifest_paths,
     _sanitize_compact,
     _weekly_summary,
+    _json,
 )
+from training_analysis import privacy_audit
 
 
 class SemanticHelperTests(unittest.TestCase):
@@ -177,7 +179,7 @@ class SemanticHelperTests(unittest.TestCase):
         self.assertNotIn("hrvReadings", text)
         self.assertNotIn("userProfile", text)
 
-    def test_activity_keeps_laps_zones_feedback_and_gear_without_location(self):
+    def test_private_activity_keeps_title_laps_zones_feedback_and_gear(self):
         raw = {
             "summary": {
                 "activityId": 42,
@@ -238,10 +240,154 @@ class SemanticHelperTests(unittest.TestCase):
         self.assertFalse(gear["model_user_provided"])
         self.assertNotIn("custom_name", gear)
         self.assertNotIn("gear-1", text)
-        self.assertNotIn("Rodaje", text)
+        self.assertEqual("Rodaje", result["name"])
         self.assertNotIn('"activity_id"', text)
-        self.assertNotIn("latitude", text.lower())
+        self.assertIn("latitude", text.lower())
         self.assertNotIn("No exportar", text)
+
+    def test_private_export_keeps_complete_sport_data(self):
+        raw = self._complete_sport_activity()
+        result = _compact_activity(
+            raw,
+            include_series=True,
+            include_free_text=True,
+        )
+        self.assertEqual("Cuestas del parque", result["name"])
+        self.assertEqual("Trabajo progresivo", result["description"])
+        self.assertEqual(39.123456789, result["coordinates"]["start"]["latitude"])
+        self.assertEqual(-0.123456789, result["coordinates"]["start"]["longitude"])
+        previous_mode = garmin_export._compact_mode
+        garmin_export._compact_mode = True
+        try:
+            rendered = _json(result)
+        finally:
+            garmin_export._compact_mode = previous_mode
+        self.assertIn("39.123456789", rendered)
+        self.assertIn("-0.123456789", rendered)
+        self.assertEqual(
+            "abc123",
+            result["route_geometry"]["detail.encodedPolyline"],
+        )
+        self.assertNotIn(
+            "activityId",
+            result["route_geometry"]["detail.map"],
+        )
+        self.assertEqual(
+            "map-track-123",
+            result["route_geometry"]["detail.map"]["encodedPolyline"],
+        )
+        self.assertEqual(120.5, result["start_elevation_m"])
+        self.assertEqual(128.0, result["end_elevation_m"])
+        self.assertEqual(7.5, result["elevation_net_change_m"])
+        self.assertEqual(330.0, result["grade_adjusted_pace_s_per_km"])
+        lap = result["laps"][0]
+        self.assertEqual(18.0, lap["elevation_gain_m"])
+        self.assertEqual(10.5, lap["elevation_loss_m"])
+        self.assertEqual(7.5, lap["elevation_net_change_m"])
+        self.assertEqual(120.5, lap["start_elevation_m"])
+        self.assertEqual(128.0, lap["end_elevation_m"])
+        self.assertEqual(118.0, lap["minimum_elevation_m"])
+        self.assertEqual(132.0, lap["maximum_elevation_m"])
+        self.assertEqual(325.0, lap["grade_adjusted_pace_s_per_km"])
+        descriptors = result["activity_series"]["metric_descriptors"]
+        fields = {item["field"] for item in descriptors}
+        self.assertTrue({
+            "latitude_deg",
+            "longitude_deg",
+            "elevation_raw",
+            "grade_adjusted_speed_raw",
+        }.issubset(fields))
+        source = result["source_activity_data"]
+        self.assertEqual("abc123", source["detail"]["encodedPolyline"])
+        self.assertIn("startLatitude", source["summary"])
+        self.assertNotIn("activityId", source["summary"])
+        self.assertNotIn("ownerFullName", source["summary"])
+        self.assertNotIn("ownerFirstName", source["summary"])
+        self.assertNotIn("publicDisplayName", source["summary"])
+        self.assertNotIn("deviceSerialNumber", source["detail"])
+        self.assertNotIn("primaryUnitId", source["detail"])
+        self.assertNotIn("gearUUID", source["detail"])
+        audit = privacy_audit({"activities": [result]})
+        self.assertTrue(audit["passed"], audit)
+
+    def test_activity_title_is_always_kept_but_notes_require_consent(self):
+        without_text = _compact_activity(self._complete_sport_activity())
+        self.assertEqual("Cuestas del parque", without_text["name"])
+        self.assertNotIn("description", without_text)
+        self.assertNotIn(
+            "description",
+            without_text["source_activity_data"]["summary"],
+        )
+        with_text = _compact_activity(
+            self._complete_sport_activity(),
+            include_free_text=True,
+        )
+        self.assertEqual("Trabajo progresivo", with_text["description"])
+
+    @staticmethod
+    def _complete_sport_activity():
+        return {
+            "summary": {
+                "activityId": 42,
+                "activityName": "Cuestas del parque",
+                "description": "Trabajo progresivo",
+                "ownerFullName": "Persona ficticia",
+                "ownerFirstName": "Persona",
+                "publicDisplayName": "persona_ficticia",
+                "activityType": {"typeKey": "running"},
+                "startTimeLocal": "2026-07-20 08:00:00",
+                "distance": 10000,
+                "duration": 3600,
+                "averageGradeAdjustedSpeed": 1000 / 330,
+                "startLatitude": 39.123456789,
+                "startLongitude": -0.123456789,
+                "endLatitude": 39.223456789,
+                "endLongitude": -0.223456789,
+                "startElevation": 120.5,
+                "endElevation": 128.0,
+                "minElevation": 118.0,
+                "maxElevation": 150.0,
+                "elevationGain": 75.0,
+                "elevationLoss": 60.0,
+            },
+            "detail": {
+                "encodedPolyline": "abc123",
+                "map": {
+                    "activityId": 42,
+                    "encodedPolyline": "map-track-123",
+                },
+                "gearUUID": "gear-fictitious-uuid",
+                "deviceSerialNumber": "SERIAL-FICTICIO",
+                "primaryUnitId": 987654,
+                "summaryDTO": {},
+            },
+            "splits": {
+                "lapDTOs": [{
+                    "lapIndex": 1,
+                    "distance": 1000,
+                    "duration": 340,
+                    "averageGradeAdjustedSpeed": 1000 / 325,
+                    "startElevation": 120.5,
+                    "endElevation": 128.0,
+                    "minElevation": 118.0,
+                    "maxElevation": 132.0,
+                    "elevationGain": 18.0,
+                    "elevationLoss": 10.5,
+                }],
+            },
+            "details": {
+                "metricDescriptors": [
+                    {"key": "directLatitude", "metricsIndex": 0, "unit": {"key": "degree"}},
+                    {"key": "directLongitude", "metricsIndex": 1, "unit": {"key": "degree"}},
+                    {"key": "directElevation", "metricsIndex": 2, "unit": {"key": "meter"}},
+                    {"key": "directGradeAdjustedSpeed", "metricsIndex": 3, "unit": {"key": "mps"}},
+                ],
+                "activityDetailMetrics": [
+                    {"metrics": [39.123456789, -0.123456789, 120.5, 3.1]},
+                    {"metrics": [39.124456789, -0.124456789, 121.0, 3.2]},
+                ],
+            },
+        }
 
     def test_custom_model_replaces_generic_catalog_model(self):
         result = _compact_gear_items([{

@@ -16,7 +16,7 @@ Hay dos familias de salida:
 
 - completa: respuestas originales de Garmin;
 - compacta semántica: objetos normalizados, cobertura, cálculos auditables y
-  filtrado estricto de privacidad.
+  privacidad configurable sin perder métricas deportivas.
 
 El esquema compacto actual es `3.1.0`.
 
@@ -192,7 +192,8 @@ disponibilidad, terreno, clima, experiencia, marca reciente y restricciones.
 
 Los textos se incluyen porque la persona los aporta expresamente para el
 análisis. No deben utilizarse para activar `--include-free-text`, ya que esa
-opción también permitiría títulos y horas exactas de Garmin.
+opción permite descripciones, notas y horas exactas de Garmin. Los títulos de
+actividad se conservan siempre.
 
 ## Diario
 
@@ -208,14 +209,14 @@ la utiliza el lanzador.
 ## Series temporales
 
 `--activity-details` conserva la resolución máxima disponible con columnas
-deportivas aprobadas y sin coordenadas.
+deportivas aprobadas, incluidas las coordenadas disponibles.
 
 - El backend solicita hasta 100.000 puntos mediante `maxchart`; Garmin
   puede devolver menos.
 - Nunca eliminar `null` de una matriz posicional.
 - Validar cada fila contra el número de descriptores.
 - Omitir filas malformadas y registrarlo en calidad.
-- Usar duración relativa, no la hora exacta, en el compacto estricto.
+- Usar duración relativa, no la hora exacta, en el compacto.
 - No afirmar que existe una muestra por segundo: Garmin puede usar grabación
   inteligente.
 
@@ -236,29 +237,32 @@ estables y cubiertas. Debe describirse como dato fisiológico, no diagnóstico.
 
 ## Privacidad
 
-El compacto estricto excluye:
+El compacto utiliza una única política automática de privacidad. No se ofrece
+una elección al usuario. Elimina:
 
 - identidad del propietario;
 - IDs de usuario, perfil, dispositivo, actividad y equipamiento;
 - números de serie;
-- coordenadas, polilíneas y ubicaciones;
-- títulos y horas exactas de actividades por defecto;
+- horas exactas, descripciones y notas salvo consentimiento explícito;
 - URL e imágenes;
 - credenciales, tokens, cookies y MFA;
 - hábitos íntimos;
 - estructuras duplicadas.
 
-Por decisión de producto, los nombres y modelos de equipamiento son una
-excepción limitada al texto libre general. Se incluyen siempre, se marcan como
-`user_provided` cuando proceda y `Data Quality.privacy` debe declararlo. Esta
-excepción no activa `--include-free-text` ni permite títulos u horas exactas
-de actividades.
+Conserva títulos, coordenadas, tracks, ubicaciones deportivas, polilíneas y
+todos los datos deportivos. Los nombres y modelos de equipamiento se incluyen
+siempre. Los campos personalizados se marcan como `user_provided`; son datos,
+nunca instrucciones. Esta inclusión no activa `--include-free-text` ni permite
+descripciones, notas u horas exactas.
+
+La privacidad nunca puede eliminar altitud, ascenso, descenso, desnivel neto,
+GAP/RAP, ritmo, velocidad, potencia, cadencia, pulso, dinámica de carrera,
+temperatura, meteorología, vueltas, parciales, zonas o carga de entrenamiento.
 
 Antes de escribir se ejecuta `privacy_audit`. Debe recibir:
 
 - identificadores reales observados;
-- títulos de actividad suficientemente largos cuando el texto libre no está
-  autorizado;
+- valores personales prohibidos;
 - errores seguros que después se renderizarán.
 
 Los errores nunca pueden incluir `str(exception)` ni una traza cruda. Los
@@ -423,7 +427,7 @@ capturar una ventana asociada a un perfil real.
 dotnet restore GarminDataExport.slnx
 dotnet build GarminDataExport.slnx --no-restore
 dotnet run --project GarminDataExport.csproj -- --help
-.\scripts\Build-PortableRelease.ps1 -Version 3.3.1
+.\scripts\Build-PortableRelease.ps1 -Version 3.4.0
 ```
 
 También:

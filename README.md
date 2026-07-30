@@ -39,7 +39,7 @@ Necesitas Windows 11, conexión a Internet y una cuenta de Garmin Connect.
 
 1. Abre la página
    [Última versión de ExportaGarmin](https://github.com/zarzawan/ExportaGarmin/releases/latest).
-2. En **Assets**, descarga `ExportaGarmin-3.3.1-Windows-x64.zip`.
+2. En **Assets**, descarga `ExportaGarmin-3.4.0-Windows-x64.zip`.
 3. No descargues **Source code**: esos enlaces son para programadores.
 4. Abre la carpeta **Descargas**.
 5. Pulsa con el botón derecho sobre el ZIP y elige **Extraer todo**.
@@ -68,11 +68,11 @@ La descarga incluye un archivo `.sha256`. Para comprobar su integridad, abre
 PowerShell dentro de Descargas y ejecuta:
 
 ```powershell
-Get-FileHash .\ExportaGarmin-3.3.1-Windows-x64.zip -Algorithm SHA256
+Get-FileHash .\ExportaGarmin-3.4.0-Windows-x64.zip -Algorithm SHA256
 ```
 
 El resultado debe coincidir con el contenido de
-`ExportaGarmin-3.3.1-Windows-x64.zip.sha256`.
+`ExportaGarmin-3.4.0-Windows-x64.zip.sha256`.
 
 </details>
 
@@ -188,6 +188,11 @@ El esquema compacto actual es `3.1.0`. Entre otras cosas, prepara:
   anteriores;
 - tendencias personales de 7 días frente a los 28 anteriores;
 - evolución de volumen, frecuencia, tirada larga, desnivel, carga y fuerza;
+- título original, altitud, ascenso, descenso y GAP/RAP cuando Garmin los
+  proporciona;
+- desnivel, altitudes y GAP/RAP de cada vuelta o parcial disponible;
+- track GPS completo cuando se solicitan las series y no se elige privacidad
+  estricta;
 - clasificación conservadora de sesiones, indicando la evidencia utilizada;
 - exposición al ritmo objetivo a partir de vueltas, si existe un tiempo
   objetivo;
@@ -316,28 +321,30 @@ muestras, las series se omiten únicamente del Excel y queda una advertencia
 en `LEEME` y `CALIDAD_DATOS`; el TXT conserva todas las muestras. Para verlas
 en Excel, utiliza un intervalo más corto o analiza una actividad por separado.
 
-También se pueden crear ambos formatos, aunque esa opción tarda más.
+También se pueden crear ambos formatos, aunque esa opción tarda más. El TXT
+conserva además una copia filtrada de la fuente deportiva de cada actividad.
+Excel mantiene los campos deportivos normalizados, las vueltas y las series
+admitidas, porque una celda de Excel no puede contener una respuesta JSON
+grande sin recortarla.
 
 ## Privacidad
 
-El modo compacto predeterminado intenta excluir:
+ExportaGarmin aplica automáticamente una única privacidad recomendada. No hay
+que elegir ni configurar nada: retira identidad, contacto, direcciones e
+identificadores personales, pero conserva títulos, coordenadas exactas,
+ubicaciones deportivas, tracks, polilíneas, altitud, vueltas y métricas.
 
-- nombre y datos identificativos del propietario;
-- identificadores reales de actividades, usuario, perfil, dispositivos y
-  equipamiento;
-- números de serie;
-- coordenadas, polilíneas y ubicaciones;
-- títulos y horas exactas de actividades;
-- URL, imágenes, cookies, tokens y credenciales;
-- hábitos íntimos y estructuras duplicadas.
+Las credenciales, contraseñas, MFA, cookies y tokens del almacén de sesión
+nunca se incorporan a la exportación.
 
 Los identificadores se sustituyen por referencias privadas estables para cada
 perfil, por ejemplo `activity_ref`. Así el diario y las tablas pueden
 relacionarse sin publicar el identificador real de Garmin.
 
 Antes de escribir el TXT o Excel se ejecuta una auditoría estructural de
-privacidad. Los fallos de Garmin se resumen sin copiar respuestas, URL o
-mensajes crudos. Si alguna sección falla, el archivo y la ventana indican
+privacidad. `Data Quality` indica la política aplicada, los campos
+conservados y eliminados y si se conservaron GPS, títulos, altitud y vueltas.
+Los fallos de Garmin se resumen sin copiar mensajes crudos. Si alguna sección falla, el archivo y la ventana indican
 **exportación parcial** para evitar conclusiones engañosas.
 
 El nombre visible y el modelo que hayas guardado en Garmin para unas
@@ -480,7 +487,7 @@ dotnet build GarminDataExport.slnx --no-restore
 Crear localmente la misma descarga portable que publica GitHub:
 
 ```powershell
-.\scripts\Build-PortableRelease.ps1 -Version 3.3.1
+.\scripts\Build-PortableRelease.ps1 -Version 3.4.0
 ```
 
 El resultado queda en `artifacts\` e incluye el ZIP y su SHA-256. GitHub
