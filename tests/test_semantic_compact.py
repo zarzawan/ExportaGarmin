@@ -314,6 +314,8 @@ class SemanticHelperTests(unittest.TestCase):
         self.assertNotIn("deviceSerialNumber", source["detail"])
         self.assertNotIn("primaryUnitId", source["detail"])
         self.assertNotIn("gearUUID", source["detail"])
+        self.assertNotIn("metadataDTO", source["detail"])
+        self.assertNotIn("Persona privada ficticia", rendered)
         audit = privacy_audit({"activities": [result]})
         self.assertTrue(audit["passed"], audit)
 
@@ -359,6 +361,11 @@ class SemanticHelperTests(unittest.TestCase):
             },
             "detail": {
                 "encodedPolyline": "abc123",
+                "metadataDTO": {
+                    "userInfoDto": {
+                        "displayname": "Persona privada ficticia",
+                    },
+                },
                 "map": {
                     "activityId": 42,
                     "encodedPolyline": "map-track-123",

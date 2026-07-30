@@ -2204,7 +2204,10 @@ _IDENTITY_PARENT_KEYS = {
     "account",
     "owner",
     "profile",
+    "user",
     "userdata",
+    "userinfo",
+    "userinfodto",
     "userprofile",
 }
 
