@@ -39,7 +39,7 @@ Necesitas Windows 11, conexión a Internet y una cuenta de Garmin Connect.
 
 1. Abre la página
    [Última versión de ExportaGarmin](https://github.com/zarzawan/ExportaGarmin/releases/latest).
-2. En **Assets**, descarga `ExportaGarmin-3.3.0-Windows-x64.zip`.
+2. En **Assets**, descarga `ExportaGarmin-3.3.1-Windows-x64.zip`.
 3. No descargues **Source code**: esos enlaces son para programadores.
 4. Abre la carpeta **Descargas**.
 5. Pulsa con el botón derecho sobre el ZIP y elige **Extraer todo**.
@@ -68,11 +68,11 @@ La descarga incluye un archivo `.sha256`. Para comprobar su integridad, abre
 PowerShell dentro de Descargas y ejecuta:
 
 ```powershell
-Get-FileHash .\ExportaGarmin-3.3.0-Windows-x64.zip -Algorithm SHA256
+Get-FileHash .\ExportaGarmin-3.3.1-Windows-x64.zip -Algorithm SHA256
 ```
 
 El resultado debe coincidir con el contenido de
-`ExportaGarmin-3.3.0-Windows-x64.zip.sha256`.
+`ExportaGarmin-3.3.1-Windows-x64.zip.sha256`.
 
 </details>
 
@@ -99,6 +99,9 @@ de GitHub o un archivo del proyecto.
 5. Cuando termine, pulsa **Abrir archivo** o **Abrir carpeta**.
 6. Sube manualmente el archivo a la IA que prefieras.
 7. Pulsa **Copiar pregunta para la IA** y pégala en la conversación.
+
+**Detalles técnicos** aparece activado para que puedas ver el progreso. Puedes
+ocultarlo si no lo necesitas; no compartas ese registro sin revisarlo.
 
 El programa propone 16 semanas para maratón y otros objetivos, y 12 para media
 maratón. Si todavía no has indicado una carrera, utiliza también 16 semanas.
@@ -477,7 +480,7 @@ dotnet build GarminDataExport.slnx --no-restore
 Crear localmente la misma descarga portable que publica GitHub:
 
 ```powershell
-.\scripts\Build-PortableRelease.ps1 -Version 3.3.0
+.\scripts\Build-PortableRelease.ps1 -Version 3.3.1
 ```
 
 El resultado queda en `artifacts\` e incluye el ZIP y su SHA-256. GitHub

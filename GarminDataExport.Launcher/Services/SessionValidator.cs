@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using GarminDataExport.Launcher.Models;
 
 namespace GarminDataExport.Launcher.Services;
@@ -24,6 +25,8 @@ internal static class SessionValidator
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8,
             CreateNoWindow = true,
         };
         backend.ApplySafePythonEnvironment(startInfo.Environment);

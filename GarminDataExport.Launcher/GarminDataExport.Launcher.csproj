@@ -8,9 +8,9 @@
     <Nullable>enable</Nullable>
     <RootNamespace>GarminDataExport.Launcher</RootNamespace>
     <AssemblyName>ExportaGarmin</AssemblyName>
-    <Version>3.3.0</Version>
-    <AssemblyVersion>3.3.0.0</AssemblyVersion>
-    <FileVersion>3.3.0.0</FileVersion>
+    <Version>3.3.1</Version>
+    <AssemblyVersion>3.3.1.0</AssemblyVersion>
+    <FileVersion>3.3.1.0</FileVersion>
     <Product>ExportaGarmin — Tus datos de Garmin, ordenados y preparados para la IA</Product>
     <AssemblyTitle>ExportaGarmin</AssemblyTitle>
     <Description>Tus datos de Garmin, ordenados y preparados para la IA.</Description>
