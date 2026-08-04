@@ -39,7 +39,7 @@ Necesitas Windows 11, conexión a Internet y una cuenta de Garmin Connect.
 
 1. Abre la página
    [Última versión de ExportaGarmin](https://github.com/zarzawan/ExportaGarmin/releases/latest).
-2. En **Assets**, descarga `ExportaGarmin-3.4.0-Windows-x64.zip`.
+2. En **Assets**, descarga `ExportaGarmin-3.5.0-Windows-x64.zip`.
 3. No descargues **Source code**: esos enlaces son para programadores.
 4. Abre la carpeta **Descargas**.
 5. Pulsa con el botón derecho sobre el ZIP y elige **Extraer todo**.
@@ -68,11 +68,11 @@ La descarga incluye un archivo `.sha256`. Para comprobar su integridad, abre
 PowerShell dentro de Descargas y ejecuta:
 
 ```powershell
-Get-FileHash .\ExportaGarmin-3.4.0-Windows-x64.zip -Algorithm SHA256
+Get-FileHash .\ExportaGarmin-3.5.0-Windows-x64.zip -Algorithm SHA256
 ```
 
 El resultado debe coincidir con el contenido de
-`ExportaGarmin-3.4.0-Windows-x64.zip.sha256`.
+`ExportaGarmin-3.5.0-Windows-x64.zip.sha256`.
 
 </details>
 
@@ -180,7 +180,7 @@ garmin_historico_2026-01-01_a_2026-07-29.txt
 
 ## Qué aporta al análisis de una carrera
 
-El esquema compacto actual es `3.1.0`. Entre otras cosas, prepara:
+El esquema compacto actual es `3.2.0`. Entre otras cosas, prepara:
 
 - una línea temporal por semanas ISO, incluidas semanas sin entrenamiento;
 - totales del periodo y cobertura de cada métrica;
@@ -193,6 +193,9 @@ El esquema compacto actual es `3.1.0`. Entre otras cosas, prepara:
 - desnivel, altitudes y GAP/RAP de cada vuelta o parcial disponible;
 - track GPS completo cuando se solicitan las series y no se elige privacidad
   estricta;
+- una sola copia de cada dato deportivo normalizado; los campos nuevos de
+  Garmin que todavía no se reconozcan quedan separados como
+  `unmapped_sport_data`;
 - clasificación conservadora de sesiones, indicando la evidencia utilizada;
 - exposición al ritmo objetivo a partir de vueltas, si existe un tiempo
   objetivo;
@@ -487,7 +490,7 @@ dotnet build GarminDataExport.slnx --no-restore
 Crear localmente la misma descarga portable que publica GitHub:
 
 ```powershell
-.\scripts\Build-PortableRelease.ps1 -Version 3.4.0
+.\scripts\Build-PortableRelease.ps1 -Version 3.5.0
 ```
 
 El resultado queda en `artifacts\` e incluye el ZIP y su SHA-256. GitHub

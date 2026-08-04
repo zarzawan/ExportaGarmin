@@ -92,7 +92,7 @@ def complete_week(week_number, running_distance_m):
 
 class SchemaContractTests(unittest.TestCase):
     def test_schema_is_v3(self):
-        self.assertEqual("3.1.0", SCHEMA_VERSION)
+        self.assertEqual("3.2.0", SCHEMA_VERSION)
 
     def test_report_extensions_share_the_v3_contract(self):
         activities = [
@@ -991,11 +991,8 @@ class PartialExportContractTests(unittest.TestCase):
 
             exporter._finalize_semantic_model()
 
-        source = activity["source_activity_data"]
-        self.assertNotIn("activityId", source["summary"])
-        self.assertNotIn("ownerFirstName", source["summary"])
-        self.assertNotIn("publicDisplayName", source["summary"])
-        self.assertNotIn("detail", source)
+        self.assertNotIn("source_activity_data", activity)
+        self.assertNotIn("unmapped_sport_data", activity)
         self.assertEqual(
             39.123456789,
             activity["coordinates"]["start"]["latitude"],
@@ -1003,6 +1000,11 @@ class PartialExportContractTests(unittest.TestCase):
         self.assertTrue(
             exporter.semantic_model["data_quality"]["privacy_audit"]["passed"]
         )
+        reduction = exporter.semantic_model["data_quality"][
+            "compact_data_reduction"
+        ]
+        self.assertFalse(reduction["raw_activity_copy_exported"])
+        self.assertTrue(reduction["normalised_sports_data_exported_once"])
 
     def test_safe_call_failure_marks_semantic_export_partial_without_raw_message(self):
         raw_message = "https://private.invalid?token=secret-value"

@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 
-SCHEMA_VERSION = "3.1.0"
+SCHEMA_VERSION = "3.2.0"
 DEFAULT_REVIEW_WEEKS = 16
 MARATHON_REVIEW_WEEKS = 16
 HALF_MARATHON_REVIEW_WEEKS = 12
@@ -2630,7 +2630,7 @@ def render_xlsx(model: dict, path: Path) -> None:
             for key, value in activity.items()
             if key not in {
                 "laps", "hr_zones", "power_zones", "gear", "activity_series",
-                "source_activity_data",
+                "source_activity_data", "unmapped_sport_data",
             }
         }))
         reference = activity.get("activity_ref")
