@@ -21,6 +21,7 @@ from garmin_export import (
     _compact_gear_items,
     _enrich_activity_gear_from_catalog,
     _find_blood_pressure_measurements,
+    _activity_source_data,
     _relative_manifest_paths,
     _sanitize_compact,
     _weekly_summary,
@@ -304,17 +305,26 @@ class SemanticHelperTests(unittest.TestCase):
             "elevation_raw",
             "grade_adjusted_speed_raw",
         }.issubset(fields))
-        source = result["source_activity_data"]
-        self.assertEqual("abc123", source["detail"]["encodedPolyline"])
-        self.assertIn("startLatitude", source["summary"])
-        self.assertNotIn("activityId", source["summary"])
-        self.assertNotIn("ownerFullName", source["summary"])
-        self.assertNotIn("ownerFirstName", source["summary"])
-        self.assertNotIn("publicDisplayName", source["summary"])
-        self.assertNotIn("deviceSerialNumber", source["detail"])
-        self.assertNotIn("primaryUnitId", source["detail"])
-        self.assertNotIn("gearUUID", source["detail"])
-        self.assertNotIn("metadataDTO", source["detail"])
+        self.assertNotIn("source_activity_data", result)
+        unmapped = result["unmapped_sport_data"]
+        self.assertEqual(51.2, unmapped["summary"]["vo2MaxValue"])
+        self.assertNotIn("distance", unmapped["summary"])
+        self.assertNotIn("startLatitude", unmapped["summary"])
+        self.assertEqual(
+            "firstbeat",
+            unmapped["detail"]["sportsMetricProvider"],
+        )
+        self.assertNotIn("encodedPolyline", unmapped["detail"])
+        self.assertNotIn("metadataDTO", unmapped["detail"])
+        unmapped_series = unmapped["details"]["unmapped_activity_series"]
+        self.assertEqual(
+            ["directRespirationRate"],
+            [
+                descriptor["source_field"]
+                for descriptor in unmapped_series["metric_descriptors"]
+            ],
+        )
+        self.assertEqual([[14.2], [14.4]], unmapped_series["samples"])
         self.assertNotIn("Persona privada ficticia", rendered)
         audit = privacy_audit({"activities": [result]})
         self.assertTrue(audit["passed"], audit)
@@ -325,7 +335,11 @@ class SemanticHelperTests(unittest.TestCase):
         self.assertNotIn("description", without_text)
         self.assertNotIn(
             "description",
-            without_text["source_activity_data"]["summary"],
+            without_text.get("unmapped_sport_data", {}).get("summary", {}),
+        )
+        self.assertNotIn(
+            "details",
+            without_text.get("unmapped_sport_data", {}),
         )
         with_text = _compact_activity(
             self._complete_sport_activity(),
@@ -358,6 +372,7 @@ class SemanticHelperTests(unittest.TestCase):
                 "maxElevation": 150.0,
                 "elevationGain": 75.0,
                 "elevationLoss": 60.0,
+                "vo2MaxValue": 51.2,
             },
             "detail": {
                 "encodedPolyline": "abc123",
@@ -374,6 +389,7 @@ class SemanticHelperTests(unittest.TestCase):
                 "deviceSerialNumber": "SERIAL-FICTICIO",
                 "primaryUnitId": 987654,
                 "summaryDTO": {},
+                "sportsMetricProvider": "firstbeat",
             },
             "splits": {
                 "lapDTOs": [{
@@ -387,6 +403,7 @@ class SemanticHelperTests(unittest.TestCase):
                     "maxElevation": 132.0,
                     "elevationGain": 18.0,
                     "elevationLoss": 10.5,
+                    "averageRespirationRate": 14.3,
                 }],
             },
             "details": {
@@ -395,13 +412,65 @@ class SemanticHelperTests(unittest.TestCase):
                     {"key": "directLongitude", "metricsIndex": 1, "unit": {"key": "degree"}},
                     {"key": "directElevation", "metricsIndex": 2, "unit": {"key": "meter"}},
                     {"key": "directGradeAdjustedSpeed", "metricsIndex": 3, "unit": {"key": "mps"}},
+                    {"key": "directRespirationRate", "metricsIndex": 4, "unit": {"key": "brpm"}},
                 ],
                 "activityDetailMetrics": [
-                    {"metrics": [39.123456789, -0.123456789, 120.5, 3.1]},
-                    {"metrics": [39.124456789, -0.124456789, 121.0, 3.2]},
+                    {"metrics": [39.123456789, -0.123456789, 120.5, 3.1, 14.2]},
+                    {"metrics": [39.124456789, -0.124456789, 121.0, 3.2, 14.4]},
                 ],
             },
         }
+
+    def test_unmapped_sport_delta_avoids_duplicate_temporal_series(self):
+        raw = self._complete_sport_activity()
+        raw["details"]["activityDetailMetrics"] = [
+            {
+                "metrics": [
+                    39.123456789 + index / 1_000_000,
+                    -0.123456789 - index / 1_000_000,
+                    120.5 + index / 100,
+                    3.1,
+                    14.2,
+                ]
+            }
+            for index in range(500)
+        ]
+        result = _compact_activity(
+            raw,
+            include_series=True,
+            include_free_text=True,
+        )
+        legacy = {
+            **result,
+            "source_activity_data": _activity_source_data(
+                raw,
+                include_free_text=True,
+            ),
+        }
+        legacy.pop("unmapped_sport_data", None)
+        compact_size = len(json.dumps(
+            result,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8"))
+        legacy_size = len(json.dumps(
+            legacy,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8"))
+
+        self.assertLess(compact_size, legacy_size * 0.75)
+        self.assertEqual(
+            500,
+            len(result["activity_series"]["samples"]),
+        )
+        self.assertEqual(
+            500,
+            len(
+                result["unmapped_sport_data"]["details"]
+                ["unmapped_activity_series"]["samples"]
+            ),
+        )
 
     def test_custom_model_replaces_generic_catalog_model(self):
         result = _compact_gear_items([{

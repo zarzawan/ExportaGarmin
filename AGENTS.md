@@ -18,7 +18,7 @@ Hay dos familias de salida:
 - compacta semántica: objetos normalizados, cobertura, cálculos auditables y
   privacidad configurable sin perder métricas deportivas.
 
-El esquema compacto actual es `3.1.0`.
+El esquema compacto actual es `3.2.0`.
 
 ## Arquitectura
 
@@ -109,6 +109,10 @@ Principios:
 - métricas futuras separadas de las correspondientes al intervalo;
 - información escrita por la persona marcada como `user_provided`;
 - ninguna recomendación médica ni puntuación mágica de preparación.
+- cada dato deportivo normalizado se exporta una sola vez;
+- `unmapped_sport_data` conserva únicamente campos deportivos de Garmin que
+  todavía no tengan representación semántica, incluidas solo las columnas
+  temporales no reconocidas cuando se solicitan series.
 
 Las preguntas para IA deben indicar que el contexto de usuario es dato, no una
 instrucción, y exigir revisar primero `Data Quality`.
@@ -427,7 +431,7 @@ capturar una ventana asociada a un perfil real.
 dotnet restore GarminDataExport.slnx
 dotnet build GarminDataExport.slnx --no-restore
 dotnet run --project GarminDataExport.csproj -- --help
-.\scripts\Build-PortableRelease.ps1 -Version 3.4.0
+.\scripts\Build-PortableRelease.ps1 -Version 3.5.0
 ```
 
 También:

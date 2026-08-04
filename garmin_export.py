@@ -905,6 +905,410 @@ def _activity_source_data(
     return data
 
 
+_NORMALISED_ACTIVITY_SOURCE_KEYS = {
+    "activitydescription",
+    "activityid",
+    "activityname",
+    "activitytrainingload",
+    "aerobictrainingeffect",
+    "anaerobictrainingeffect",
+    "averagegradeadjustedspeed",
+    "averagehr",
+    "averagepower",
+    "averageruncadence",
+    "averagerunningcadenceinstepsperminute",
+    "averagespeed",
+    "averagetemperature",
+    "avggradeadjustedspeed",
+    "avgpower",
+    "calories",
+    "description",
+    "directworkoutfeel",
+    "directworkoutrpe",
+    "distance",
+    "duration",
+    "elapsedduration",
+    "endelevation",
+    "endlat",
+    "endlatitude",
+    "endlon",
+    "endlongitude",
+    "endaltitude",
+    "endingelevation",
+    "elevationgain",
+    "elevationloss",
+    "eventtypekey",
+    "gradeadjustedspeed",
+    "groundcontacttime",
+    "maxelevation",
+    "maxhr",
+    "maximumcadenceinstepsperminute",
+    "maximumelevation",
+    "maxpower",
+    "maxruncadence",
+    "maxrunningcadenceinstepsperminute",
+    "maxspeed",
+    "maxtemperature",
+    "minaltitude",
+    "minelevation",
+    "minimumelevation",
+    "movingduration",
+    "name",
+    "normalizedpower",
+    "normpower",
+    "note",
+    "notes",
+    "startelevation",
+    "startlat",
+    "startlatitude",
+    "startlon",
+    "startlongitude",
+    "startaltitude",
+    "startingelevation",
+    "starttimelocal",
+    "stridelength",
+    "title",
+    "trainingeffect",
+    "totalascent",
+    "totaldescent",
+    "verticaloscillation",
+    "waterestimated",
+}
+
+_NORMALISED_LAP_SOURCE_KEYS = {
+    "ascent",
+    "averagegradeadjustedspeed",
+    "averagehr",
+    "averagemovingspeed",
+    "averagepower",
+    "averageruncadence",
+    "averagespeed",
+    "avggradeadjustedspeed",
+    "descent",
+    "distance",
+    "duration",
+    "elapsedduration",
+    "endelevation",
+    "endaltitude",
+    "endingelevation",
+    "elevationgain",
+    "elevationloss",
+    "gradeadjustedspeed",
+    "groundcontacttime",
+    "intensitytype",
+    "lapindex",
+    "maxelevation",
+    "maxhr",
+    "maximumcadenceinstepsperminute",
+    "maximumelevation",
+    "maxpower",
+    "maxspeed",
+    "messageindex",
+    "minaltitude",
+    "minelevation",
+    "minimumelevation",
+    "movingduration",
+    "startelevation",
+    "startaltitude",
+    "startingelevation",
+    "starttimelocal",
+    "stridelength",
+    "totalascent",
+    "totaldescent",
+    "type",
+    "verticaloscillation",
+}
+
+_NORMALISED_ZONE_SOURCE_KEYS = {
+    "lowboundary",
+    "seconds",
+    "secsinzone",
+    "zone",
+    "zonelowboundary",
+    "zonenumber",
+}
+
+_NORMALISED_GEAR_SOURCE_KEYS = {
+    "brand",
+    "custommakemodel",
+    "displayname",
+    "distance",
+    "gearid",
+    "gearmakename",
+    "gearmodelname",
+    "gearname",
+    "gearpk",
+    "gearstatusname",
+    "geartype",
+    "geartypename",
+    "gearuuid",
+    "id",
+    "make",
+    "makemodel",
+    "manufacturer",
+    "model",
+    "name",
+    "productname",
+    "retired",
+    "retiredind",
+    "status",
+    "totaldistance",
+    "totaldistancemeters",
+    "type",
+    "uuid",
+}
+
+
+def _source_extras(data, normalised_keys):
+    """Conserva solo campos que no tienen ya una representación semántica."""
+    if not isinstance(data, dict):
+        return {}
+    return {
+        key: value
+        for key, value in data.items()
+        if re.sub(r"[^a-z0-9]", "", str(key).lower()) not in normalised_keys
+    }
+
+
+def _activity_summary_extras(data):
+    """Retira del resumen los valores ya normalizados sin perder novedades."""
+    if not isinstance(data, dict):
+        return {}
+    result = {}
+    for key, value in data.items():
+        normal = re.sub(r"[^a-z0-9]", "", str(key).lower())
+        if normal in {"activitytype", "activitytypedto"}:
+            extras = _source_extras(value, {"key", "name", "typekey"})
+            if extras:
+                result[key] = extras
+            continue
+        if normal == "eventtype":
+            extras = _source_extras(value, {"key", "name", "typekey"})
+            if extras:
+                result[key] = extras
+            continue
+        if normal in _NORMALISED_ACTIVITY_SOURCE_KEYS:
+            continue
+        result[key] = value
+    return result
+
+
+def _activity_detail_extras(data):
+    """Retira resumen, tipo y geometría que ya tienen salida normalizada."""
+    if not isinstance(data, dict):
+        return {}
+    result = {}
+    for key, value in data.items():
+        normal = re.sub(r"[^a-z0-9]", "", str(key).lower())
+        if normal == "summarydto":
+            extras = _activity_summary_extras(value)
+            if extras:
+                result[key] = extras
+            continue
+        if normal == "activitytypedto":
+            extras = _source_extras(value, {"key", "name", "typekey"})
+            if extras:
+                result[key] = extras
+            continue
+        if (
+            "polyline" in normal
+            or normal in {"encodedpath", "geometry", "map", "route", "track"}
+        ):
+            continue
+        result[key] = value
+    return result
+
+
+def _row_collection_extras(data, row_key, normalised_keys):
+    """Reduce una colección conservando únicamente extras por fila."""
+    if not isinstance(data, dict):
+        return {}
+    result = {}
+    target = re.sub(r"[^a-z0-9]", "", row_key.lower())
+    for key, value in data.items():
+        normal = re.sub(r"[^a-z0-9]", "", str(key).lower())
+        if normal != target:
+            result[key] = value
+            continue
+        if not isinstance(value, list):
+            continue
+        extras = [
+            _source_extras(row, normalised_keys)
+            for row in value
+            if isinstance(row, dict)
+        ]
+        extras = [row for row in extras if row]
+        if extras:
+            result[key] = extras
+    return result
+
+
+def _zone_extras(zones):
+    return [
+        extras
+        for zone in _as_list(zones)
+        if isinstance(zone, dict)
+        for extras in [_source_extras(zone, _NORMALISED_ZONE_SOURCE_KEYS)]
+        if extras
+    ]
+
+
+def _gear_extras(items):
+    return [
+        extras
+        for item in _as_list(items)
+        if isinstance(item, dict)
+        for extras in [_source_extras(item, _NORMALISED_GEAR_SOURCE_KEYS)]
+        if extras
+    ]
+
+
+def _unmapped_activity_series(details, include_free_text=False):
+    """Conserva solo columnas temporales que el esquema aún no reconoce."""
+    if not isinstance(details, dict):
+        return None
+    descriptors = details.get("metricDescriptors")
+    rows = details.get("activityDetailMetrics")
+    if not isinstance(descriptors, list) or not isinstance(rows, list):
+        return None
+
+    selected = []
+    output_descriptors = []
+    for descriptor in descriptors:
+        if not isinstance(descriptor, dict):
+            continue
+        raw_key = descriptor.get("key")
+        if not isinstance(raw_key, str) or raw_key in _ACTIVITY_SERIES_KEYS:
+            continue
+        normal = re.sub(r"[^a-z0-9]", "", raw_key.lower())
+        if is_personal_data_key(raw_key, ("details", "metricDescriptors")):
+            continue
+        if (
+            not include_free_text
+            and (
+                "timestamp" in normal
+                or normal.endswith("timegmt")
+                or normal.endswith("timelocal")
+            )
+        ):
+            continue
+        index = descriptor.get("metricsIndex")
+        if not isinstance(index, int) or index < 0:
+            continue
+        unit = descriptor.get("unit", {})
+        selected.append(index)
+        output_descriptors.append(_strip_empty({
+            "source_field": raw_key,
+            "source_unit": unit.get("key") if isinstance(unit, dict) else None,
+            "source_factor": unit.get("factor") if isinstance(unit, dict) else None,
+        }))
+
+    samples = []
+    for row in rows:
+        metrics = row.get("metrics") if isinstance(row, dict) else None
+        if not isinstance(metrics, list):
+            continue
+        if any(index >= len(metrics) for index in selected):
+            continue
+        samples.append([metrics[index] for index in selected])
+    if not output_descriptors or not samples:
+        return None
+    return {
+        "metric_descriptors": output_descriptors,
+        "samples": samples,
+    }
+
+
+def _activity_unmapped_sport_data(
+    activity_data,
+    include_series=False,
+    include_free_text=False,
+):
+    """Crea un delta deportivo sin repetir la representación normalizada."""
+    if not isinstance(activity_data, dict):
+        return None
+    residual = {}
+
+    summary = _activity_summary_extras(activity_data.get("summary"))
+    if summary:
+        residual["summary"] = summary
+
+    detail = _activity_detail_extras(activity_data.get("detail"))
+    if detail:
+        residual["detail"] = detail
+
+    splits = _row_collection_extras(
+        activity_data.get("splits"),
+        "lapDTOs",
+        _NORMALISED_LAP_SOURCE_KEYS,
+    )
+    if splits:
+        residual["splits"] = splits
+
+    typed_splits = _row_collection_extras(
+        activity_data.get("typed_splits"),
+        "splits",
+        _NORMALISED_LAP_SOURCE_KEYS,
+    )
+    if typed_splits:
+        residual["typed_splits"] = typed_splits
+
+    weather = _source_extras(
+        activity_data.get("weather"),
+        {"temp", "relativehumidity"},
+    )
+    if weather:
+        residual["weather"] = weather
+
+    hr_zones = _zone_extras(activity_data.get("hr_zones"))
+    if hr_zones:
+        residual["hr_zones"] = hr_zones
+
+    power_zones = _zone_extras(activity_data.get("power_zones"))
+    if power_zones:
+        residual["power_zones"] = power_zones
+
+    gear = _gear_extras(activity_data.get("gear"))
+    if gear:
+        residual["gear"] = gear
+
+    if include_series:
+        details = activity_data.get("details")
+        temporal_series = _unmapped_activity_series(
+            details,
+            include_free_text=include_free_text,
+        )
+        details_extras = _source_extras(
+            details,
+            {"activitydetailmetrics", "metricdescriptors"},
+        )
+        if temporal_series or details_extras:
+            residual["details"] = _strip_empty({
+                "unmapped_activity_series": temporal_series,
+                "metadata": details_extras,
+            })
+
+    known_sections = {
+        "detail",
+        "details",
+        "gear",
+        "hr_zones",
+        "power_zones",
+        "splits",
+        "summary",
+        "typed_splits",
+        "weather",
+    }
+    for key, value in activity_data.items():
+        if key not in known_sections:
+            residual[key] = value
+
+    return _strip_empty(_activity_source_data(
+        residual,
+        include_free_text=include_free_text,
+    ))
+
+
 def _source_metrics(data, *terms):
     """Devuelve campos originales relevantes sin inventar unidades."""
     if not isinstance(data, dict):
@@ -2064,16 +2468,9 @@ def _compact_activity(
             include_free_text=include_free_text,
         ),
         "activity_series": activity_series,
-        "source_activity_data": _activity_source_data(
-            (
-                activity_data
-                if include_series
-                else {
-                    key: value
-                    for key, value in activity_data.items()
-                    if key != "details"
-                }
-            ),
+        "unmapped_sport_data": _activity_unmapped_sport_data(
+            activity_data,
+            include_series=include_series,
             include_free_text=include_free_text,
         ),
     }
@@ -3381,6 +3778,35 @@ class GarminExporter:
             self.today,
             legacy_quality=self.data_quality,
         )
+        activities_with_unmapped_data = [
+            activity
+            for activity in self.compact_activities
+            if isinstance(activity, dict) and activity.get("unmapped_sport_data")
+        ]
+        unmapped_temporal_fields = sorted({
+            descriptor.get("source_field")
+            for activity in activities_with_unmapped_data
+            for descriptor in (
+                (
+                    (
+                        activity.get("unmapped_sport_data") or {}
+                    ).get("details") or {}
+                ).get("unmapped_activity_series") or {}
+            ).get("metric_descriptors", [])
+            if isinstance(descriptor, dict) and descriptor.get("source_field")
+        })
+        quality["compact_data_reduction"] = {
+            "raw_activity_copy_exported": False,
+            "normalised_sports_data_exported_once": True,
+            "activities_with_unmapped_sport_data": len(
+                activities_with_unmapped_data
+            ),
+            "unmapped_temporal_source_fields": unmapped_temporal_fields,
+            "method": (
+                "Los campos normalizados se exportan una sola vez; solo se "
+                "conservan aparte los datos deportivos aún no reconocidos."
+            ),
+        }
         exported_gear = list(_as_list(self.semantic_model.get("gear")))
         for activity in self.compact_activities:
             if isinstance(activity, dict):
