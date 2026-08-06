@@ -92,7 +92,7 @@ def complete_week(week_number, running_distance_m):
 
 class SchemaContractTests(unittest.TestCase):
     def test_schema_is_v3(self):
-        self.assertEqual("3.2.0", SCHEMA_VERSION)
+        self.assertEqual("3.3.1", SCHEMA_VERSION)
 
     def test_report_extensions_share_the_v3_contract(self):
         activities = [
@@ -1205,19 +1205,17 @@ class XlsxContractTests(unittest.TestCase):
                         [1, 641.8, 642.6],
                     ],
                 },
-                "gear": [{
-                    "gear_ref": "gear_abcdef123456",
-                    "gear_name": (
-                        '=HYPERLINK("https://invalid.example/gear")'
-                    ),
-                    "manufacturer": "Nike",
-                    "model": "Vaporfly 3",
-                    "gear_name_user_provided": True,
-                    "model_user_provided": False,
-                    "type": "Shoes",
-                }],
+                "gear_refs": ["gear_abcdef123456"],
             }],
-            "gear": [],
+            "gear": [{
+                "gear_ref": "gear_abcdef123456",
+                "gear_name": '=HYPERLINK("https://invalid.example/gear")',
+                "manufacturer": "Nike",
+                "model": "Vaporfly 3",
+                "gear_name_user_provided": True,
+                "model_user_provided": False,
+                "type": "Shoes",
+            }],
             "journal": [{
                 "date": "2026-01-01",
                 "note": "=HYPERLINK(\"https://invalid.example\")",
@@ -1289,22 +1287,20 @@ class XlsxContractTests(unittest.TestCase):
                 ).value,
             )
             self.assertEqual(
-                "Nike",
+                "gear_abcdef123456",
                 activity_gear.cell(
                     2,
-                    activity_gear_headers["manufacturer"],
+                    activity_gear_headers["gear_ref"],
                 ).value,
             )
-            self.assertEqual(
-                "Vaporfly 3",
-                activity_gear.cell(
-                    2,
-                    activity_gear_headers["model"],
-                ).value,
-            )
-            gear_formula_like = activity_gear.cell(
+            self.assertNotIn("manufacturer", activity_gear_headers)
+            gear_sheet = workbook["EQUIPAMIENTO"]
+            gear_headers = {
+                cell.value: cell.column for cell in gear_sheet[1]
+            }
+            gear_formula_like = gear_sheet.cell(
                 2,
-                activity_gear_headers["gear_name"],
+                gear_headers["gear_name"],
             )
             self.assertEqual(
                 '\'=HYPERLINK("https://invalid.example/gear")',

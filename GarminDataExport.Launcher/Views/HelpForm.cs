@@ -24,7 +24,7 @@ internal sealed class HelpForm : Form
 
             5. Usa «Revisión recomendada» para crear el archivo habitual. Después súbelo manualmente a la IA que prefieras y pulsa «Copiar pregunta para la IA».
 
-            Si algo falla, abre «Detalles técnicos». No compartas el registro sin revisarlo.
+            El panel «Progreso de la exportación» permanece visible. Si algo falla, revisa allí el último paso; no compartas el registro sin comprobarlo.
             """));
         tabs.TabPages.Add(CreatePage(
             "Cada día",

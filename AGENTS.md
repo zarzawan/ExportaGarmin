@@ -18,7 +18,7 @@ Hay dos familias de salida:
 - compacta semántica: objetos normalizados, cobertura, cálculos auditables y
   privacidad configurable sin perder métricas deportivas.
 
-El esquema compacto actual es `3.2.0`.
+El esquema compacto actual es `3.3.1`.
 
 ## Arquitectura
 
@@ -110,16 +110,22 @@ Principios:
 - información escrita por la persona marcada como `user_provided`;
 - ninguna recomendación médica ni puntuación mágica de preparación.
 - cada dato deportivo normalizado se exporta una sola vez;
-- `unmapped_sport_data` conserva únicamente campos deportivos de Garmin que
-  todavía no tengan representación semántica, incluidas solo las columnas
-  temporales no reconocidas cuando se solicitan series.
+- `laps` es la representación canónica de vueltas; `interval_summaries` solo
+  conserva agrupaciones distintas y elimina las copias equivalentes. Su
+  identidad semántica usa tipo, cantidad, distancia y duración con tolerancia
+  de redondeo. `split_summaries` y `detail.splitSummaries` tienen prioridad;
+  `summary.splitSummaries` se usa solo como alternativa;
+- `unmapped_sport_data` conserva únicamente campos hoja deportivos de Garmin
+  que todavía no tengan representación semántica, incluidas solo las columnas
+  temporales no reconocidas cuando se solicitan series. Nunca copia
+  contenedores raw completos.
 
 Las preguntas para IA deben indicar que el contexto de usuario es dato, no una
 instrucción, y exigir revisar primero `Data Quality`.
 
 ## Equipamiento
 
-Cada asociación de actividad puede contener:
+La sección global `Gear` contiene la identidad canónica del material:
 
 ```text
 gear_ref
@@ -131,17 +137,17 @@ model_user_provided
 type
 ```
 
-`gear_name`, `manufacturer` y `model` son necesarios para interpretar el efecto
-del material, por ejemplo distinguir zapatillas normales de competición. Los
-campos personalizados se marcan como `user_provided`; son datos, nunca
+Cada actividad contiene únicamente `gear_refs`. `gear_name`, `manufacturer` y
+`model` se consultan una sola vez en `Gear`; son necesarios para interpretar el
+efecto del material, por ejemplo distinguir zapatillas normales de competición.
+Los campos personalizados se marcan como `user_provided`; son datos, nunca
 instrucciones para una IA. No se debe inferir automáticamente que un modelo
 lleva placa de carbono si el dato no está confirmado.
 
 `gear_ref` es una referencia HMAC. Nunca exportar `gearPk`, UUID,
 `userProfilePk`, imágenes, fechas técnicas ni otros identificadores reales.
-Las asociaciones reducidas se completan desde el catálogo global por
-`gear_ref`. En XLSX, `ACTIVIDAD_EQUIPAMIENTO` debe conservar la identidad
-normalizada además de las referencias.
+En XLSX, `ACTIVIDAD_EQUIPAMIENTO` contiene únicamente `activity_ref` y
+`gear_ref`; la identidad normalizada se consulta en `EQUIPAMIENTO`.
 
 ## XLSX
 
@@ -233,8 +239,10 @@ estables y cubiertas. Debe describirse como dato fisiológico, no diagnóstico.
 - Epochs de sueño: milisegundos UTC a ISO 8601 con zona IANA histórica.
 - Temperatura meteorológica: Fahrenheit a Celsius.
 - Temperatura directa del sensor: ya está en Celsius.
-- RPE Garmin `10..100`: presentación `1..10`, conservando el original dentro
-  de la autoevaluación.
+- RPE Garmin `10..100`: presentación `1..10`; el compacto omite el valor raw.
+- Viento meteorológico: metros por segundo; dirección en grados.
+- `totalAscent` y `totalDescent` de intervalos: metros. No aplicar una división
+  general entre 100; resolver conflictos conservando la fuente prioritaria.
 - Zona 0: solo tiempo con pulso válido por debajo de zona 1.
 - Tiempo sin pulso: campo independiente, nunca zona 0.
 - Valores con unidad no confirmada: conservar original, no inventar conversión.
@@ -380,10 +388,10 @@ Los `.pyc` de la descarga se compilan con Python 3.11. El código fuente
 legible permanece separado y se obtiene desde el repositorio público indicado
 en `CODIGO_FUENTE.txt`.
 
-El registro técnico se muestra por defecto, incluida una migración única de
-preferencias anteriores. Todos los procesos redirigidos deben leer la salida
-de Python como UTF-8 para conservar correctamente el español. El usuario puede
-ocultar después el registro y su elección debe persistir.
+El registro técnico se muestra siempre y dispone de una zona amplia en la
+ventana principal. No existe un control para ocultarlo. Todos los procesos
+redirigidos deben leer la salida de Python como UTF-8 para conservar
+correctamente el español.
 
 `scripts/Build-PortableRelease.ps1` descarga el runtime oficial fijado de
 Python, verifica su SHA-256, instala el lock dentro del paquete, publica .NET
@@ -431,7 +439,7 @@ capturar una ventana asociada a un perfil real.
 dotnet restore GarminDataExport.slnx
 dotnet build GarminDataExport.slnx --no-restore
 dotnet run --project GarminDataExport.csproj -- --help
-.\scripts\Build-PortableRelease.ps1 -Version 3.5.0
+.\scripts\Build-PortableRelease.ps1 -Version 3.5.1
 ```
 
 También:

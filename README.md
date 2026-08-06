@@ -39,7 +39,7 @@ Necesitas Windows 11, conexión a Internet y una cuenta de Garmin Connect.
 
 1. Abre la página
    [Última versión de ExportaGarmin](https://github.com/zarzawan/ExportaGarmin/releases/latest).
-2. En **Assets**, descarga `ExportaGarmin-3.5.0-Windows-x64.zip`.
+2. En **Assets**, descarga `ExportaGarmin-3.5.1-Windows-x64.zip`.
 3. No descargues **Source code**: esos enlaces son para programadores.
 4. Abre la carpeta **Descargas**.
 5. Pulsa con el botón derecho sobre el ZIP y elige **Extraer todo**.
@@ -68,11 +68,11 @@ La descarga incluye un archivo `.sha256`. Para comprobar su integridad, abre
 PowerShell dentro de Descargas y ejecuta:
 
 ```powershell
-Get-FileHash .\ExportaGarmin-3.5.0-Windows-x64.zip -Algorithm SHA256
+Get-FileHash .\ExportaGarmin-3.5.1-Windows-x64.zip -Algorithm SHA256
 ```
 
 El resultado debe coincidir con el contenido de
-`ExportaGarmin-3.5.0-Windows-x64.zip.sha256`.
+`ExportaGarmin-3.5.1-Windows-x64.zip.sha256`.
 
 </details>
 
@@ -100,8 +100,8 @@ de GitHub o un archivo del proyecto.
 6. Sube manualmente el archivo a la IA que prefieras.
 7. Pulsa **Copiar pregunta para la IA** y pégala en la conversación.
 
-**Detalles técnicos** aparece activado para que puedas ver el progreso. Puedes
-ocultarlo si no lo necesitas; no compartas ese registro sin revisarlo.
+El panel **Progreso de la exportación** permanece siempre visible y muestra qué
+está haciendo el programa. No compartas ese registro sin revisarlo.
 
 El programa propone 16 semanas para maratón y otros objetivos, y 12 para media
 maratón. Si todavía no has indicado una carrera, utiliza también 16 semanas.
@@ -180,7 +180,7 @@ garmin_historico_2026-01-01_a_2026-07-29.txt
 
 ## Qué aporta al análisis de una carrera
 
-El esquema compacto actual es `3.2.0`. Entre otras cosas, prepara:
+El esquema compacto actual es `3.3.1`. Entre otras cosas, prepara:
 
 - una línea temporal por semanas ISO, incluidas semanas sin entrenamiento;
 - totales del periodo y cobertura de cada métrica;
@@ -194,8 +194,12 @@ El esquema compacto actual es `3.2.0`. Entre otras cosas, prepara:
 - track GPS completo cuando se solicitan las series y no se elige privacidad
   estricta;
 - una sola copia de cada dato deportivo normalizado; los campos nuevos de
-  Garmin que todavía no se reconozcan quedan separados como
-  `unmapped_sport_data`;
+  Garmin que todavía no se reconozcan se conservan por campo útil, sin copiar
+  de nuevo respuestas completas dentro de `unmapped_sport_data`;
+- una única lista de vueltas; los resúmenes de intervalos solo aparecen aparte
+  cuando contienen una agrupación deportiva realmente distinta. Desde el
+  esquema 3.3.1 se fusionan por tipo, cantidad, distancia y duración, y separan
+  el ritmo total del ritmo en movimiento;
 - clasificación conservadora de sesiones, indicando la evidencia utilizada;
 - exposición al ritmo objetivo a partir de vueltas, si existe un tiempo
   objetivo;
@@ -203,8 +207,9 @@ El esquema compacto actual es `3.2.0`. Entre otras cosas, prepara:
   suficientes;
 - presión arterial, composición corporal, hidratación y nutrición cuando hay
   mediciones reales;
-- autoevaluación de Garmin y equipamiento asociado automáticamente, con su
-  nombre, fabricante y modelo;
+- autoevaluación de Garmin y equipamiento asociado automáticamente. Cada
+  actividad guarda solo una referencia; el nombre, fabricante y modelo se
+  encuentran una sola vez en la sección global de equipamiento;
 - preguntas preparadas para revisiones semanales, mensuales y por actividad;
 - calidad de datos, valores ausentes, transformaciones y límites del análisis.
 
@@ -426,8 +431,9 @@ lo ya descargado.
 
 ### El archivo indica exportación parcial
 
-Abre **Detalles técnicos**. El archivo sigue siendo utilizable, pero una o más
-secciones no terminaron. Repite más tarde si esos datos son importantes.
+Consulta el panel **Progreso de la exportación**, que permanece visible. El
+archivo sigue siendo utilizable, pero una o más secciones no terminaron.
+Repite más tarde si esos datos son importantes.
 
 ### No aparecen sueño, VFC o presión arterial
 
@@ -490,7 +496,7 @@ dotnet build GarminDataExport.slnx --no-restore
 Crear localmente la misma descarga portable que publica GitHub:
 
 ```powershell
-.\scripts\Build-PortableRelease.ps1 -Version 3.5.0
+.\scripts\Build-PortableRelease.ps1 -Version 3.5.1
 ```
 
 El resultado queda en `artifacts\` e incluye el ZIP y su SHA-256. GitHub
