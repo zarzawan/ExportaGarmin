@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 
-SCHEMA_VERSION = "3.2.0"
+SCHEMA_VERSION = "3.3.1"
 DEFAULT_REVIEW_WEEKS = 16
 MARATHON_REVIEW_WEEKS = 16
 HALF_MARATHON_REVIEW_WEEKS = 12
@@ -1342,12 +1342,6 @@ def build_period_summary(
             ),
         },
         "heart_rate_distribution": _aggregate_heart_rate(activities),
-        "daily_metric_coverage": build_data_coverage(
-            daily_records,
-            start_date,
-            end_date,
-            activities,
-        ),
     }
 
 
@@ -1787,14 +1781,7 @@ def build_race_analysis(
         for row in weekly_timeline
         if (_number(row.get("longest_run_distance_m")) or 0) > 0
     ]
-    race_event = (race_context or {}).get("event") or {}
     return {
-        "race_status": {
-            "status": race_event.get("status", "context_not_provided"),
-            "race_date": race_event.get("race_date"),
-            "days_remaining": race_event.get("days_remaining"),
-            "weeks_remaining": race_event.get("weeks_remaining"),
-        },
         "four_week_comparison": compare_four_week_blocks(weekly_timeline),
         "personal_7_vs_28_day_baselines": build_personal_baselines(
             daily_records,
@@ -2035,18 +2022,19 @@ def build_quality_report(
         activities,
     )
     issues = []
+    incomplete_metrics = []
     for metric, values in coverage.items():
         missing = values.get("missing_days", values.get("missing_activities", 0))
         if missing:
-            issues.append({
-                "code": f"{metric.upper()}_MISSING",
-                "severity": "warning",
-                "scope": "requested_period",
-                "message": (
-                    f"Faltan {missing} observaciones de {metric}; consulta su "
-                    "cobertura antes de interpretar promedios."
-                ),
-            })
+            incomplete_metrics.append(metric)
+    if incomplete_metrics:
+        issues.append({
+            "code": "INCOMPLETE_COVERAGE",
+            "severity": "warning",
+            "scope": "requested_period",
+            "metrics": incomplete_metrics,
+            "message": "Consulta Data Quality.coverage antes de interpretar promedios.",
+        })
     legacy_quality = legacy_quality or {}
     for category in (
         "endpoint_errors",
@@ -2629,7 +2617,7 @@ def render_xlsx(model: dict, path: Path) -> None:
             key: value
             for key, value in activity.items()
             if key not in {
-                "laps", "hr_zones", "power_zones", "gear", "activity_series",
+                "laps", "hr_zones", "power_zones", "gear_refs", "activity_series",
                 "source_activity_data", "unmapped_sport_data",
             }
         }))
@@ -2646,12 +2634,11 @@ def render_xlsx(model: dict, path: Path) -> None:
                     "zone_type": zone_type,
                     **_flatten_dict(zone),
                 })
-        for gear in activity.get("gear", []) or []:
-            if isinstance(gear, dict):
-                activity_gear_rows.append({
-                    "activity_ref": reference,
-                    **_flatten_dict(gear),
-                })
+        for gear_ref in activity.get("gear_refs", []) or []:
+            activity_gear_rows.append({
+                "activity_ref": reference,
+                "gear_ref": gear_ref,
+            })
     add_table("ACTIVIDADES", activity_rows)
     add_table("VUELTAS", lap_rows)
     add_table("ZONAS", zone_rows)

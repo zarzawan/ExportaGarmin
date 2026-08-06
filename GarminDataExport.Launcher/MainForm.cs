@@ -69,10 +69,8 @@ internal sealed class MainForm : Form
     private readonly Button _cancelButton = new();
     private readonly Button _openFolderButton = new();
     private readonly Button _openFileButton = new();
-    private readonly CheckBox _showLog = new();
     private readonly GroupBox _logGroup = new();
     private readonly TextBox _logBox = new();
-    private RowStyle? _logRowStyle;
 
     private string? _projectRoot;
     private Process? _currentProcess;
@@ -92,8 +90,8 @@ internal sealed class MainForm : Form
             : ProfileStore.CreateReadmePreview();
         Text = "ExportaGarmin — Tus datos de Garmin, ordenados y preparados para la IA";
         StartPosition = FormStartPosition.CenterScreen;
-        MinimumSize = new Size(920, 720);
-        Size = new Size(1030, 880);
+        MinimumSize = new Size(960, 900);
+        Size = new Size(1120, 1000);
         Font = new Font("Segoe UI", 10F);
 
         BuildInterface();
@@ -158,8 +156,7 @@ internal sealed class MainForm : Form
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        _logRowStyle = new RowStyle(SizeType.Absolute, 0);
-        root.RowStyles.Add(_logRowStyle);
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 240));
         Controls.Add(root);
 
         root.Controls.Add(BuildHeader(), 0, 0);
@@ -176,14 +173,15 @@ internal sealed class MainForm : Form
         _progress.Margin = new Padding(0, 5, 0, 6);
         root.Controls.Add(_progress, 0, 6);
 
-        _logGroup.Text = "Detalles técnicos (revísalos antes de compartirlos)";
+        _logGroup.Text = "Progreso de la exportación (revísalo antes de compartirlo)";
         _logGroup.Dock = DockStyle.Fill;
         _logGroup.Padding = new Padding(10);
-        _logGroup.Visible = false;
+        _logGroup.MinimumSize = new Size(0, 250);
         _logBox.Dock = DockStyle.Fill;
         _logBox.Multiline = true;
         _logBox.ReadOnly = true;
-        _logBox.ScrollBars = ScrollBars.Vertical;
+        _logBox.ScrollBars = ScrollBars.Both;
+        _logBox.WordWrap = false;
         _logBox.Font = new Font("Consolas", 9F);
         _logBox.BackColor = Color.FromArgb(248, 249, 250);
         _logGroup.Controls.Add(_logBox);
@@ -643,11 +641,6 @@ internal sealed class MainForm : Form
         _openFileButton.Click += (_, _) => OpenLastOutput();
         bar.Controls.Add(_openFileButton);
 
-        _showLog.Text = "Detalles técnicos";
-        _showLog.AutoSize = true;
-        _showLog.Margin = new Padding(12, 11, 0, 0);
-        _showLog.CheckedChanged += (_, _) => ToggleTechnicalLog();
-        bar.Controls.Add(_showLog);
         return bar;
     }
 
@@ -1257,7 +1250,8 @@ internal sealed class MainForm : Form
                 MessageBox.Show(
                     this,
                     "Se ha creado un archivo utilizable, pero Garmin no devolvió correctamente " +
-                    "todas las secciones.\n\nAbre «Detalles técnicos», revisa qué ha faltado y " +
+                    "todas las secciones.\n\nRevisa el panel «Progreso de la exportación» y " +
+                    "comprueba qué ha faltado. Después " +
                     "vuelve a intentarlo más tarde si esos datos son importantes.",
                     "Exportación parcial",
                     MessageBoxButtons.OK,
@@ -1715,19 +1709,6 @@ internal sealed class MainForm : Form
         });
     }
 
-    private void ToggleTechnicalLog()
-    {
-        var visible = _showLog.Checked;
-        _logGroup.Visible = visible;
-        var workingHeight = Screen.FromControl(this).WorkingArea.Height;
-        if (_logRowStyle is not null)
-            _logRowStyle.Height = visible ? 120 : 0;
-        _settings.ShowTechnicalLog = visible;
-        if (visible && Height < 880)
-            Height = Math.Min(workingHeight, 880);
-        SaveSettings();
-    }
-
     private void DatePickerChanged(object? sender, EventArgs e)
     {
         if (_startDate.Value.Date > _endDate.Value.Date)
@@ -1956,8 +1937,6 @@ internal sealed class MainForm : Form
             _startDate.Value = _endDate.Value;
         _historyActivityDetails.Checked = _settings.IncludeActivityDetails;
         SelectFormat(_settings.OutputFormat);
-        _showLog.Checked = _settings.ShowTechnicalLog;
-        ToggleTechnicalLog();
         RefreshReviewPeriod();
         RefreshOutputPreview();
     }
@@ -1976,7 +1955,6 @@ internal sealed class MainForm : Form
             _settings.EndDate = _endDate.Value.Date;
             _settings.IncludeActivityDetails = _historyActivityDetails.Checked;
         }
-        _settings.ShowTechnicalLog = _showLog.Checked;
         try
         {
             AtomicJsonStore.Write(AppPaths.SettingsFile, _settings);
@@ -2078,7 +2056,6 @@ internal sealed class MainForm : Form
         _status.Text = _readmePreviewMode == "informe"
             ? "Elige las fechas y pulsa «Crear archivo para la IA»."
             : "Todo preparado. Pulsa «Crear archivo para la IA».";
-        _showLog.Checked = true;
         _logBox.Text =
             "12:00:00 [INFO] Sesión iniciada con los tokens guardados" +
             Environment.NewLine +

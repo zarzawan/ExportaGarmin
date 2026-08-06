@@ -12,7 +12,7 @@ ABRIR
 No necesitas instalar nada más.
 
 Si descargaste el código fuente en vez de
-ExportaGarmin-3.5.0-Windows-x64.zip, vuelve a GitHub Releases y descarga el
+ExportaGarmin-3.5.1-Windows-x64.zip, vuelve a GitHub Releases y descarga el
 archivo correcto de la sección Assets.
 
 AVISO DE WINDOWS

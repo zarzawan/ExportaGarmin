@@ -19,7 +19,6 @@ from garmin_export import (
     _compact_profile,
     _compact_training,
     _compact_gear_items,
-    _enrich_activity_gear_from_catalog,
     _find_blood_pressure_measurements,
     _activity_source_data,
     _relative_manifest_paths,
@@ -233,14 +232,11 @@ class SemanticHelperTests(unittest.TestCase):
             5,
             result["self_evaluation"]["perceived_exertion_1_10"],
         )
-        gear = result["gear"][0]
-        self.assertRegex(gear["gear_ref"], r"^gear_[0-9a-f]{12}$")
-        self.assertEqual("Zapatillas de competición", gear["gear_name"])
-        self.assertEqual("ASICS", gear["manufacturer"])
-        self.assertEqual("METASPEED SKY PARIS", gear["model"])
-        self.assertTrue(gear["gear_name_user_provided"])
-        self.assertFalse(gear["model_user_provided"])
-        self.assertNotIn("custom_name", gear)
+        self.assertEqual(1, len(result["gear_refs"]))
+        self.assertRegex(result["gear_refs"][0], r"^gear_[0-9a-f]{12}$")
+        self.assertNotIn("gear", result)
+        self.assertNotIn("Zapatillas de competición", text)
+        self.assertNotIn("METASPEED SKY PARIS", text)
         self.assertNotIn("gear-1", text)
         self.assertNotIn("987654321", text)
         self.assertEqual("Rodaje", result["name"])
@@ -306,17 +302,13 @@ class SemanticHelperTests(unittest.TestCase):
             "grade_adjusted_speed_raw",
         }.issubset(fields))
         self.assertNotIn("source_activity_data", result)
+        self.assertEqual(51.2, result["vo2_max_ml_kg_min"])
+        self.assertEqual(14.3, lap["average_respiration_rate_brpm"])
         unmapped = result["unmapped_sport_data"]
-        self.assertEqual(51.2, unmapped["summary"]["vo2MaxValue"])
-        self.assertNotIn("distance", unmapped["summary"])
-        self.assertNotIn("startLatitude", unmapped["summary"])
-        self.assertEqual(
-            "firstbeat",
-            unmapped["detail"]["sportsMetricProvider"],
-        )
-        self.assertNotIn("encodedPolyline", unmapped["detail"])
-        self.assertNotIn("metadataDTO", unmapped["detail"])
-        unmapped_series = unmapped["details"]["unmapped_activity_series"]
+        self.assertNotIn("fields", unmapped)
+        self.assertNotIn("summary", unmapped)
+        self.assertNotIn("detail", unmapped)
+        unmapped_series = unmapped["activity_series"]
         self.assertEqual(
             ["directRespirationRate"],
             [
@@ -467,8 +459,7 @@ class SemanticHelperTests(unittest.TestCase):
         self.assertEqual(
             500,
             len(
-                result["unmapped_sport_data"]["details"]
-                ["unmapped_activity_series"]["samples"]
+                result["unmapped_sport_data"]["activity_series"]["samples"]
             ),
         )
 
@@ -496,38 +487,25 @@ class SemanticHelperTests(unittest.TestCase):
         self.assertNotIn("987654321", encoded)
         self.assertNotIn("private-gear-uuid", encoded)
 
-    def test_activity_gear_is_enriched_from_global_catalog(self):
-        activities = [{
-            "activity_ref": "activity_abcdef123456",
+    def test_activity_only_contains_gear_references(self):
+        result = _compact_activity({
+            "summary": {
+                "activityId": 42,
+                "activityName": "Rodaje",
+                "activityType": {"typeKey": "running"},
+            },
             "gear": [{
-                "gear_ref": "gear_abcdef123456",
-                "type": "Shoes",
+                "uuid": "gear-1",
+                "displayName": "Zapatillas de competición",
+                "gearMakeName": "ASICS",
+                "gearModelName": "METASPEED SKY PARIS",
             }],
-        }]
-        catalog = [{
-            "gear_ref": "gear_abcdef123456",
-            "gear_name": "Zapatillas de competición",
-            "manufacturer": "ASICS",
-            "model": "METASPEED SKY PARIS",
-            "gear_name_user_provided": True,
-            "model_user_provided": False,
-            "type": "Running Shoes",
-        }]
+        })
 
-        _enrich_activity_gear_from_catalog(activities, catalog)
-
-        association = activities[0]["gear"][0]
-        self.assertEqual(
-            "Zapatillas de competición",
-            association["gear_name"],
-        )
-        self.assertEqual("ASICS", association["manufacturer"])
-        self.assertEqual("METASPEED SKY PARIS", association["model"])
-        self.assertEqual(
-            "Shoes",
-            association["type"],
-            "El catálogo no debe sustituir un valor ya asociado.",
-        )
+        self.assertEqual(1, len(result["gear_refs"]))
+        encoded = json.dumps(result, ensure_ascii=False)
+        self.assertNotIn("Zapatillas de competición", encoded)
+        self.assertNotIn("METASPEED", encoded)
 
     def test_training_separates_future_snapshot(self):
         raw = {
@@ -705,15 +683,12 @@ class SemanticExporterIntegrationTests(unittest.TestCase):
                 "perceived_exertion_1_10"
             ],
         )
-        gear = exporter.compact_activities[0]["gear"][0]
+        gear_ref = exporter.compact_activities[0]["gear_refs"][0]
         self.assertRegex(
-            gear["gear_ref"],
+            gear_ref,
             r"^gear_[0-9a-f]{12}$",
         )
-        self.assertEqual("Zapatillas rápidas", gear["gear_name"])
-        self.assertEqual("Nike", gear["manufacturer"])
-        self.assertEqual("Vaporfly 3", gear["model"])
-        self.assertNotIn("custom_name", gear)
+        self.assertNotIn("gear", exporter.compact_activities[0])
 
     def test_global_gear_uses_profile_id_returned_by_current_library(self):
         api = Mock()

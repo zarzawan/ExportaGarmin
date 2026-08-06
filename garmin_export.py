@@ -750,9 +750,7 @@ def _normalise_self_evaluation(dto):
     if not evaluated:
         return None
     return _strip_empty({
-        "perceived_exertion_raw": rpe_raw,
         "perceived_exertion_1_10": rpe,
-        "feeling_raw": feeling_raw,
         "feeling": feeling,
     })
 
@@ -913,14 +911,24 @@ _NORMALISED_ACTIVITY_SOURCE_KEYS = {
     "aerobictrainingeffect",
     "anaerobictrainingeffect",
     "averagegradeadjustedspeed",
+    "averagebikingcadenceinrevperminute",
     "averagehr",
     "averagepower",
     "averageruncadence",
     "averagerunningcadenceinstepsperminute",
     "averagespeed",
     "averagetemperature",
+    "avgelevation",
+    "avggroundcontacttime",
     "avggradeadjustedspeed",
     "avgpower",
+    "avgstridelength",
+    "avgverticaloscillation",
+    "avgverticalratio",
+    "aerobictrainingeffectmessage",
+    "anaerobictrainingeffectmessage",
+    "autocalccalories",
+    "bmrcalories",
     "calories",
     "description",
     "directworkoutfeel",
@@ -937,10 +945,13 @@ _NORMALISED_ACTIVITY_SOURCE_KEYS = {
     "endingelevation",
     "elevationgain",
     "elevationloss",
+    "elevationcorrected",
     "eventtypekey",
     "gradeadjustedspeed",
     "groundcontacttime",
     "maxelevation",
+    "maxbikingcadenceinrevperminute",
+    "maxdoublecadence",
     "maxhr",
     "maximumcadenceinstepsperminute",
     "maximumelevation",
@@ -948,10 +959,12 @@ _NORMALISED_ACTIVITY_SOURCE_KEYS = {
     "maxruncadence",
     "maxrunningcadenceinstepsperminute",
     "maxspeed",
+    "maxverticalspeed",
     "maxtemperature",
     "minaltitude",
     "minelevation",
     "minimumelevation",
+    "mintemperature",
     "movingduration",
     "name",
     "normalizedpower",
@@ -969,198 +982,104 @@ _NORMALISED_ACTIVITY_SOURCE_KEYS = {
     "stridelength",
     "title",
     "trainingeffect",
+    "trainingeffectlabel",
     "totalascent",
     "totaldescent",
     "verticaloscillation",
+    "vo2maxvalue",
     "waterestimated",
+    "isautocalccalories",
+    "iselevationcorrected",
+    "strokes",
+    "powertimeinzone1",
+    "powertimeinzone2",
+    "powertimeinzone3",
+    "powertimeinzone4",
+    "powertimeinzone5",
 }
 
-_NORMALISED_LAP_SOURCE_KEYS = {
-    "ascent",
-    "averagegradeadjustedspeed",
-    "averagehr",
-    "averagemovingspeed",
-    "averagepower",
-    "averageruncadence",
-    "averagespeed",
-    "avggradeadjustedspeed",
-    "descent",
-    "distance",
-    "duration",
-    "elapsedduration",
-    "endelevation",
-    "endaltitude",
-    "endingelevation",
-    "elevationgain",
-    "elevationloss",
-    "gradeadjustedspeed",
-    "groundcontacttime",
-    "intensitytype",
-    "lapindex",
-    "maxelevation",
-    "maxhr",
-    "maximumcadenceinstepsperminute",
-    "maximumelevation",
-    "maxpower",
-    "maxspeed",
-    "messageindex",
-    "minaltitude",
-    "minelevation",
-    "minimumelevation",
-    "movingduration",
-    "startelevation",
-    "startaltitude",
-    "startingelevation",
-    "starttimelocal",
-    "stridelength",
-    "totalascent",
-    "totaldescent",
-    "type",
-    "verticaloscillation",
+_UNMAPPED_SPORT_TERMS = (
+    "aerobic", "anaerobic", "balance", "cadence", "calorie", "contact",
+    "distance", "elevation", "energy", "grade", "heart", "humidity",
+    "lactate", "load", "pace", "power", "respiration", "speed", "stamina",
+    "stride", "stroke", "sweat", "temperature", "trainingeffect", "vertical",
+    "vo2", "weather", "wind",
+)
+
+_UNMAPPED_BLOCKED_CONTAINERS = {
+    "activitydetailmetrics",
+    "activitytypedto",
+    "activitytype",
+    "gear",
+    "hrzones",
+    "lapdtos",
+    "metadata",
+    "metadatadto",
+    "metricdescriptors",
+    "powerzones",
+    "splits",
+    "splitsummaries",
+    "summarydto",
+    "typedsplits",
 }
 
-_NORMALISED_ZONE_SOURCE_KEYS = {
-    "lowboundary",
-    "seconds",
-    "secsinzone",
-    "zone",
-    "zonelowboundary",
-    "zonenumber",
-}
-
-_NORMALISED_GEAR_SOURCE_KEYS = {
-    "brand",
-    "custommakemodel",
-    "displayname",
-    "distance",
-    "gearid",
-    "gearmakename",
-    "gearmodelname",
-    "gearname",
-    "gearpk",
-    "gearstatusname",
-    "geartype",
-    "geartypename",
-    "gearuuid",
-    "id",
-    "make",
-    "makemodel",
-    "manufacturer",
-    "model",
-    "name",
-    "productname",
-    "retired",
-    "retiredind",
-    "status",
-    "totaldistance",
-    "totaldistancemeters",
-    "type",
-    "uuid",
-}
+_UNMAPPED_TECHNICAL_TERMS = (
+    "device", "displayname", "endpoint", "image", "metadata",
+    "provider", "serial", "token", "url", "uuid",
+)
 
 
-def _source_extras(data, normalised_keys):
-    """Conserva solo campos que no tienen ya una representación semántica."""
-    if not isinstance(data, dict):
-        return {}
-    return {
-        key: value
-        for key, value in data.items()
-        if re.sub(r"[^a-z0-9]", "", str(key).lower()) not in normalised_keys
-    }
+def _collect_unmapped_sport_leaves(
+    data,
+    source_path,
+    consumed_keys=None,
+    include_free_text=False,
+):
+    """Extrae solo hojas deportivas útiles sin copiar contenedores raw."""
+    consumed_keys = consumed_keys or set()
+    found = {}
 
+    def visit(value, path, parents=()):
+        if isinstance(value, dict):
+            for key, nested in value.items():
+                normal = re.sub(r"[^a-z0-9]", "", str(key).lower())
+                if normal in _UNMAPPED_BLOCKED_CONTAINERS:
+                    continue
+                if normal in consumed_keys:
+                    continue
+                if not include_free_text and normal in _OPTIONAL_ACTIVITY_TEXT_KEYS:
+                    continue
+                if is_personal_data_key(key, parents):
+                    continue
+                if (
+                    normal == "id"
+                    or normal.endswith(("id", "pk"))
+                    or any(term in normal for term in _UNMAPPED_TECHNICAL_TERMS)
+                ):
+                    continue
+                visit(nested, f"{path}.{key}".strip("."), (*parents, normal))
+            return
+        if isinstance(value, list):
+            for index, nested in enumerate(value):
+                visit(nested, f"{path}[{index}]", parents)
+            return
+        leaf_name = re.sub(
+            r"[^a-z0-9]",
+            "",
+            path.rsplit(".", 1)[-1].split("[", 1)[0].lower(),
+        )
+        if not any(term in leaf_name for term in _UNMAPPED_SPORT_TERMS):
+            return
+        cleaned = _activity_source_data(
+            value,
+            include_free_text=include_free_text,
+            parents=parents,
+        )
+        if cleaned not in (None, "", [], {}):
+            found[path] = cleaned
 
-def _activity_summary_extras(data):
-    """Retira del resumen los valores ya normalizados sin perder novedades."""
-    if not isinstance(data, dict):
-        return {}
-    result = {}
-    for key, value in data.items():
-        normal = re.sub(r"[^a-z0-9]", "", str(key).lower())
-        if normal in {"activitytype", "activitytypedto"}:
-            extras = _source_extras(value, {"key", "name", "typekey"})
-            if extras:
-                result[key] = extras
-            continue
-        if normal == "eventtype":
-            extras = _source_extras(value, {"key", "name", "typekey"})
-            if extras:
-                result[key] = extras
-            continue
-        if normal in _NORMALISED_ACTIVITY_SOURCE_KEYS:
-            continue
-        result[key] = value
-    return result
-
-
-def _activity_detail_extras(data):
-    """Retira resumen, tipo y geometría que ya tienen salida normalizada."""
-    if not isinstance(data, dict):
-        return {}
-    result = {}
-    for key, value in data.items():
-        normal = re.sub(r"[^a-z0-9]", "", str(key).lower())
-        if normal == "summarydto":
-            extras = _activity_summary_extras(value)
-            if extras:
-                result[key] = extras
-            continue
-        if normal == "activitytypedto":
-            extras = _source_extras(value, {"key", "name", "typekey"})
-            if extras:
-                result[key] = extras
-            continue
-        if (
-            "polyline" in normal
-            or normal in {"encodedpath", "geometry", "map", "route", "track"}
-        ):
-            continue
-        result[key] = value
-    return result
-
-
-def _row_collection_extras(data, row_key, normalised_keys):
-    """Reduce una colección conservando únicamente extras por fila."""
-    if not isinstance(data, dict):
-        return {}
-    result = {}
-    target = re.sub(r"[^a-z0-9]", "", row_key.lower())
-    for key, value in data.items():
-        normal = re.sub(r"[^a-z0-9]", "", str(key).lower())
-        if normal != target:
-            result[key] = value
-            continue
-        if not isinstance(value, list):
-            continue
-        extras = [
-            _source_extras(row, normalised_keys)
-            for row in value
-            if isinstance(row, dict)
-        ]
-        extras = [row for row in extras if row]
-        if extras:
-            result[key] = extras
-    return result
-
-
-def _zone_extras(zones):
-    return [
-        extras
-        for zone in _as_list(zones)
-        if isinstance(zone, dict)
-        for extras in [_source_extras(zone, _NORMALISED_ZONE_SOURCE_KEYS)]
-        if extras
-    ]
-
-
-def _gear_extras(items):
-    return [
-        extras
-        for item in _as_list(items)
-        if isinstance(item, dict)
-        for extras in [_source_extras(item, _NORMALISED_GEAR_SOURCE_KEYS)]
-        if extras
-    ]
+    visit(data, source_path)
+    return found
 
 
 def _unmapped_activity_series(details, include_free_text=False):
@@ -1227,50 +1146,31 @@ def _activity_unmapped_sport_data(
     """Crea un delta deportivo sin repetir la representación normalizada."""
     if not isinstance(activity_data, dict):
         return None
-    residual = {}
-
-    summary = _activity_summary_extras(activity_data.get("summary"))
-    if summary:
-        residual["summary"] = summary
-
-    detail = _activity_detail_extras(activity_data.get("detail"))
-    if detail:
-        residual["detail"] = detail
-
-    splits = _row_collection_extras(
-        activity_data.get("splits"),
-        "lapDTOs",
-        _NORMALISED_LAP_SOURCE_KEYS,
-    )
-    if splits:
-        residual["splits"] = splits
-
-    typed_splits = _row_collection_extras(
-        activity_data.get("typed_splits"),
-        "splits",
-        _NORMALISED_LAP_SOURCE_KEYS,
-    )
-    if typed_splits:
-        residual["typed_splits"] = typed_splits
-
-    weather = _source_extras(
+    fields = {}
+    fields.update(_collect_unmapped_sport_leaves(
+        activity_data.get("summary"),
+        "summary",
+        _NORMALISED_ACTIVITY_SOURCE_KEYS,
+        include_free_text,
+    ))
+    fields.update(_collect_unmapped_sport_leaves(
+        activity_data.get("detail"),
+        "detail",
+        _NORMALISED_ACTIVITY_SOURCE_KEYS,
+        include_free_text,
+    ))
+    fields.update(_collect_unmapped_sport_leaves(
         activity_data.get("weather"),
-        {"temp", "relativehumidity"},
-    )
-    if weather:
-        residual["weather"] = weather
-
-    hr_zones = _zone_extras(activity_data.get("hr_zones"))
-    if hr_zones:
-        residual["hr_zones"] = hr_zones
-
-    power_zones = _zone_extras(activity_data.get("power_zones"))
-    if power_zones:
-        residual["power_zones"] = power_zones
-
-    gear = _gear_extras(activity_data.get("gear"))
-    if gear:
-        residual["gear"] = gear
+        "weather",
+        {
+            "temp",
+            "relativehumidity",
+            "windspeed",
+            "winddirection",
+            "winddirectioncompasspoint",
+        },
+        include_free_text,
+    ))
 
     if include_series:
         details = activity_data.get("details")
@@ -1278,15 +1178,9 @@ def _activity_unmapped_sport_data(
             details,
             include_free_text=include_free_text,
         )
-        details_extras = _source_extras(
-            details,
-            {"activitydetailmetrics", "metricdescriptors"},
-        )
-        if temporal_series or details_extras:
-            residual["details"] = _strip_empty({
-                "unmapped_activity_series": temporal_series,
-                "metadata": details_extras,
-            })
+    residual = {"fields": fields} if fields else {}
+    if include_series and temporal_series:
+        residual["activity_series"] = temporal_series
 
     known_sections = {
         "detail",
@@ -1298,27 +1192,22 @@ def _activity_unmapped_sport_data(
         "summary",
         "typed_splits",
         "weather",
+        "split_summaries",
     }
     for key, value in activity_data.items():
         if key not in known_sections:
-            residual[key] = value
+            residual.setdefault("fields", {}).update(
+                _collect_unmapped_sport_leaves(
+                    value,
+                    str(key),
+                    include_free_text=include_free_text,
+                )
+            )
 
     return _strip_empty(_activity_source_data(
         residual,
         include_free_text=include_free_text,
     ))
-
-
-def _source_metrics(data, *terms):
-    """Devuelve campos originales relevantes sin inventar unidades."""
-    if not isinstance(data, dict):
-        return {}
-    result = {}
-    for key, value in data.items():
-        normal = re.sub(r"[^a-z0-9]", "", str(key).lower())
-        if any(term in normal for term in terms):
-            result[str(key)] = value
-    return result
 
 
 def _route_geometry(data):
@@ -1331,10 +1220,11 @@ def _route_geometry(data):
         for key, nested in value.items():
             key_path = f"{path}.{key}".strip(".")
             normal = re.sub(r"[^a-z0-9]", "", str(key).lower())
-            if (
+            is_geometry = (
                 "polyline" in normal
                 or normal in {"encodedpath", "geometry", "map", "route", "track"}
-            ):
+            )
+            if is_geometry and not isinstance(nested, bool) and not normal.startswith("has"):
                 found[key_path] = nested
             elif isinstance(nested, dict):
                 visit(nested, key_path)
@@ -1727,6 +1617,47 @@ def _normalise_zones(zones, boundary_name):
     return [zone for zone in result if zone]
 
 
+def _normalise_power_zones(activity_data):
+    """Prioriza el endpoint de zonas y usa los alias del resumen como respaldo."""
+    if not isinstance(activity_data, dict):
+        return []
+    result = _normalise_zones(
+        activity_data.get("power_zones"),
+        "low_boundary_w",
+    )
+    by_zone = {
+        int(zone["zone"]): zone
+        for zone in result
+        if _number(zone.get("zone")) is not None
+    }
+    sources = [
+        activity_data.get("summary"),
+        (
+            (activity_data.get("detail") or {}).get("summaryDTO")
+            if isinstance(activity_data.get("detail"), dict)
+            else None
+        ),
+    ]
+    for zone_number in range(1, 6):
+        duration = _number(_pick(
+            sources,
+            f"powerTimeInZone_{zone_number}",
+            f"powerTimeInZone{zone_number}",
+        ))
+        existing = by_zone.get(zone_number)
+        if existing is not None:
+            if existing.get("duration_s") is None and duration is not None:
+                existing["duration_s"] = duration
+            continue
+        if duration is None:
+            continue
+        zone = {"zone": zone_number, "duration_s": duration}
+        result.append(zone)
+        by_zone[zone_number] = zone
+    result.sort(key=lambda item: _number(item.get("zone")) or 0)
+    return result
+
+
 def _mark_partial_last_lap(laps):
     """Marca solo una última vuelta claramente truncada respecto a las anteriores."""
     if not isinstance(laps, list) or len(laps) < 4:
@@ -1816,7 +1747,13 @@ def _normalise_laps(activity_data, include_exact_times=False):
             "maximum_heart_rate_bpm": _number(_pick(lap, "maxHR")),
             "average_power_w": _number(_pick(lap, "averagePower")),
             "maximum_power_w": _number(_pick(lap, "maxPower")),
+            "normalized_power_w": _number(
+                _pick(lap, "normPower", "normalizedPower")
+            ),
             "average_cadence_spm": _number(_pick(lap, "averageRunCadence")),
+            "average_respiration_rate_brpm": _number(
+                _pick(lap, "averageRespirationRate")
+            ),
             "average_stride_length_cm": _number(_pick(lap, "strideLength")),
             "average_ground_contact_time_ms": _number(
                 _pick(lap, "groundContactTime")
@@ -1824,6 +1761,11 @@ def _normalise_laps(activity_data, include_exact_times=False):
             "average_vertical_oscillation_cm": _number(
                 _pick(lap, "verticalOscillation")
             ),
+            "calories_kcal": _number(_pick(lap, "calories")),
+            "average_temperature_c": _number(
+                _pick(lap, "averageTemperature")
+            ),
+            "maximum_temperature_c": _number(_pick(lap, "maxTemperature")),
             "elevation_gain_m": elevation_gain,
             "elevation_loss_m": elevation_loss,
             "elevation_net_change_m": elevation_net,
@@ -1843,14 +1785,225 @@ def _normalise_laps(activity_data, include_exact_times=False):
                 _pick(lap, "maxElevation", "maximumElevation", "maxAltitude")
             ),
             "grade_adjusted_pace_s_per_km": _pace_from_speed(gap_speed),
-            "grade_adjusted_pace_source": _source_metrics(
-                lap,
-                "gradeadjusted",
-                "gap",
-                "rap",
-            ),
         }))
     return _mark_partial_last_lap(result), source_name
+
+
+def _normalise_interval_summaries(activity_data, laps):
+    """Fusiona resúmenes por identidad, priorizando las fuentes detalladas."""
+    if not isinstance(activity_data, dict):
+        return []
+
+    detail = activity_data.get("detail")
+    source_containers = [
+        (0, activity_data.get("split_summaries")),
+        (0, detail),
+        (1, activity_data.get("summary")),
+    ]
+    candidates = []
+    for priority, container in source_containers:
+        if not isinstance(container, dict):
+            continue
+        source_rows = container.get("splitSummaries")
+        if isinstance(source_rows, list):
+            candidates.extend(
+                (priority, row)
+                for row in source_rows
+                if isinstance(row, dict)
+            )
+
+    def normalise_row(row):
+        max_speed = _pick(row, "maxSpeed")
+        gap_speed = _pick(
+            row,
+            "averageGradeAdjustedSpeed",
+            "avgGradeAdjustedSpeed",
+            "gradeAdjustedSpeed",
+        )
+        distance_m = _number(_pick(row, "totalDistance", "distance"))
+        duration_s = _number(_pick(row, "totalDuration", "duration"))
+        moving_duration_s = _number(
+            _pick(row, "totalMovingDuration", "movingDuration")
+        )
+        average_pace = (
+            duration_s / (distance_m / 1000.0)
+            if duration_s is not None and distance_m and distance_m > 0
+            else None
+        )
+        moving_pace = (
+            moving_duration_s / (distance_m / 1000.0)
+            if moving_duration_s is not None and distance_m and distance_m > 0
+            else None
+        )
+        elevation_gain = _number(
+            _pick(row, "elevationGain", "totalAscent", "ascent")
+        )
+        elevation_loss = _number(
+            _pick(row, "elevationLoss", "totalDescent", "descent")
+        )
+        return _strip_empty({
+            "interval_index": _number(
+                _pick(row, "splitIndex", "lapIndex", "messageIndex")
+            ),
+            "interval_type": _pick(row, "splitType", "type", "intensityType"),
+            "interval_count": _number(_pick(row, "noOfSplits", "splitCount")),
+            "distance_m": distance_m,
+            "duration_s": duration_s,
+            "moving_duration_s": moving_duration_s,
+            "average_pace_s_per_km": _rounded(average_pace, 1),
+            "moving_pace_s_per_km": _rounded(moving_pace, 1),
+            "best_pace_s_per_km": _pace_from_speed(max_speed),
+            "average_heart_rate_bpm": _number(_pick(row, "averageHR")),
+            "maximum_heart_rate_bpm": _number(_pick(row, "maxHR")),
+            "average_power_w": _number(_pick(row, "averagePower")),
+            "maximum_power_w": _number(_pick(row, "maxPower")),
+            "average_cadence_spm": _number(_pick(row, "averageRunCadence")),
+            "average_respiration_rate_brpm": _number(
+                _pick(row, "averageRespirationRate")
+            ),
+            "calories_kcal": _number(_pick(row, "calories")),
+            "elevation_gain_m": elevation_gain,
+            "elevation_loss_m": elevation_loss,
+            "minimum_elevation_m": _number(
+                _pick(row, "minElevation", "minimumElevation", "minAltitude")
+            ),
+            "maximum_elevation_m": _number(
+                _pick(row, "maxElevation", "maximumElevation", "maxAltitude")
+            ),
+            "grade_adjusted_pace_s_per_km": _pace_from_speed(gap_speed),
+        })
+
+    def close_enough(left, right, absolute, relative=0.0001):
+        left = _number(left)
+        right = _number(right)
+        if left is None or right is None:
+            return left is right
+        return abs(left - right) <= max(
+            absolute,
+            relative * max(abs(left), abs(right)),
+        )
+
+    def same_identity(left, right):
+        left_type = str(left.get("interval_type") or "").upper()
+        right_type = str(right.get("interval_type") or "").upper()
+        if left_type != right_type:
+            return False
+        if not close_enough(
+            left.get("interval_count"),
+            right.get("interval_count"),
+            0,
+            0,
+        ):
+            return False
+        return close_enough(
+            left.get("distance_m"), right.get("distance_m"), 0.5
+        ) and close_enough(
+            left.get("duration_s"), right.get("duration_s"), 0.2
+        )
+
+    summary_dto = detail.get("summaryDTO") if isinstance(detail, dict) else None
+    activity_gain = _number(_pick(
+        [activity_data.get("summary"), summary_dto],
+        "elevationGain",
+        "totalAscent",
+    ))
+    activity_loss = _number(_pick(
+        [activity_data.get("summary"), summary_dto],
+        "elevationLoss",
+        "totalDescent",
+    ))
+
+    def prefer_plausible_elevation(preferred, secondary, field, activity_total):
+        left = _number(preferred.get(field))
+        right = _number(secondary.get(field))
+        if left is None or right is None or activity_total is None:
+            return
+        larger = max(abs(left), abs(right))
+        smaller = min(abs(left), abs(right))
+        if smaller <= 0 or not 90 <= larger / smaller <= 110:
+            return
+        limit = max(activity_total * 1.05, activity_total + 2.0)
+        left_plausible = abs(left) <= limit
+        right_plausible = abs(right) <= limit
+        if left_plausible != right_plausible:
+            preferred[field] = left if left_plausible else right
+
+    merged = []
+    for priority, row in candidates:
+        item = normalise_row(row)
+        if not item:
+            continue
+        existing_entry = next(
+            (entry for entry in merged if same_identity(entry["item"], item)),
+            None,
+        )
+        if existing_entry is None:
+            merged.append({"priority": priority, "item": item})
+            continue
+
+        existing = existing_entry["item"]
+        should_replace = (
+            priority < existing_entry["priority"]
+            or (
+                priority == existing_entry["priority"]
+                and len(item) > len(existing)
+            )
+        )
+        if should_replace:
+            preferred, secondary = item, existing
+            existing_entry["priority"] = priority
+        else:
+            preferred, secondary = existing, item
+        prefer_plausible_elevation(
+            preferred,
+            secondary,
+            "elevation_gain_m",
+            activity_gain,
+        )
+        prefer_plausible_elevation(
+            preferred,
+            secondary,
+            "elevation_loss_m",
+            activity_loss,
+        )
+        for field, value in secondary.items():
+            if field not in preferred and value is not None:
+                preferred[field] = value
+        existing_entry["item"] = preferred
+
+    normalised = [entry["item"] for entry in merged]
+
+    comparison_fields = (
+        "distance_m",
+        "duration_s",
+        "average_pace_s_per_km",
+        "average_heart_rate_bpm",
+        "average_power_w",
+        "elevation_gain_m",
+        "elevation_loss_m",
+    )
+
+    def repeats_lap(item):
+        candidates = laps
+        interval_index = item.get("interval_index")
+        if interval_index is not None:
+            candidates = [
+                lap for lap in laps
+                if lap.get("lap_index") == interval_index
+            ]
+        for lap in candidates:
+            comparable = [
+                field for field in comparison_fields
+                if field in item and field in lap
+            ]
+            if len(comparable) >= 2 and all(
+                close_enough(item[field], lap[field], 0.2)
+                for field in comparable
+            ):
+                return True
+        return False
+
+    return [item for item in normalised if not repeats_lap(item)]
 
 
 _ACTIVITY_SERIES_KEYS = {
@@ -2199,40 +2352,6 @@ def _compact_gear_items(
     return [item for item in result if item]
 
 
-def _enrich_activity_gear_from_catalog(activities, catalog):
-    """Completa asociaciones reducidas con la identidad del catálogo global."""
-    catalog_by_reference = {
-        item.get("gear_ref"): item
-        for item in _as_list(catalog)
-        if isinstance(item, dict) and item.get("gear_ref")
-    }
-    identity_fields = (
-        "gear_name",
-        "manufacturer",
-        "model",
-        "gear_name_user_provided",
-        "model_user_provided",
-        "type",
-    )
-    for activity in _as_list(activities):
-        if not isinstance(activity, dict):
-            continue
-        for association in _as_list(activity.get("gear")):
-            if not isinstance(association, dict):
-                continue
-            catalog_item = catalog_by_reference.get(
-                association.get("gear_ref")
-            )
-            if not catalog_item:
-                continue
-            for field in identity_fields:
-                if association.get(field) in (None, ""):
-                    value = catalog_item.get(field)
-                    if value not in (None, ""):
-                        association[field] = value
-    return activities
-
-
 def _activity_time_bucket(start_local):
     """Conserva una franja útil sin publicar la hora exacta."""
     if not isinstance(start_local, str):
@@ -2282,6 +2401,7 @@ def _compact_activity(
         activity_data,
         include_exact_times=include_free_text,
     )
+    interval_summaries = _normalise_interval_summaries(activity_data, laps)
     duration_s = _number(_pick(sources, "duration"))
     average_hr = _number(_pick(sources, "averageHR"))
     hr_zones = _normalise_zones(
@@ -2302,8 +2422,17 @@ def _compact_activity(
         temperature = _normalise_temperature(device_temperature, "celsius")
     else:
         temperature = _normalise_temperature(weather.get("temp"), "fahrenheit")
+        if quality_callback and temperature.get("temperature_c") is not None:
+            quality_callback(
+                "unit_conversions",
+                "weather.temp se convirtió de Fahrenheit a Celsius; las temperaturas directas del sensor se conservaron como Celsius.",
+            )
     maximum_temperature = _normalise_temperature(
         _pick(sources, "maxTemperature"),
+        "celsius",
+    )
+    minimum_temperature = _normalise_temperature(
+        _pick(sources, "minTemperature"),
         "celsius",
     )
 
@@ -2381,14 +2510,33 @@ def _compact_activity(
             _pick(sources, "averageRunningCadenceInStepsPerMinute", "averageRunCadence")
         ),
         "maximum_cadence_spm": _number(
-            _pick(sources, "maxRunningCadenceInStepsPerMinute", "maxRunCadence")
+            _pick(
+                sources,
+                "maxRunningCadenceInStepsPerMinute",
+                "maxRunCadence",
+                "maxDoubleCadence",
+            )
         ),
-        "average_stride_length_cm": _number(_pick(sources, "strideLength")),
+        "average_cycling_cadence_rpm": _number(
+            _pick(sources, "averageBikingCadenceInRevPerMinute")
+        ),
+        "maximum_cycling_cadence_rpm": _number(
+            _pick(sources, "maxBikingCadenceInRevPerMinute")
+        ),
+        "average_stride_length_cm": _number(
+            _pick(sources, "strideLength", "avgStrideLength")
+        ),
         "average_ground_contact_time_ms": _number(
-            _pick(sources, "groundContactTime")
+            _pick(sources, "groundContactTime", "avgGroundContactTime")
         ),
         "average_vertical_oscillation_cm": _number(
-            _pick(sources, "verticalOscillation")
+            _pick(sources, "verticalOscillation", "avgVerticalOscillation")
+        ),
+        "average_vertical_ratio_pct": _number(
+            _pick(sources, "avgVerticalRatio")
+        ),
+        "maximum_vertical_speed_m_s": _number(
+            _pick(sources, "maxVerticalSpeed")
         ),
         "elevation_gain_m": elevation_gain,
         "elevation_loss_m": elevation_loss,
@@ -2408,11 +2556,8 @@ def _compact_activity(
         "maximum_elevation_m": _number(
             _pick(sources, "maxElevation", "maximumElevation", "maxAltitude")
         ),
+        "average_elevation_m": _number(_pick(sources, "avgElevation")),
         "grade_adjusted_pace_s_per_km": _pace_from_speed(gap_speed),
-        "grade_adjusted_pace_source": {
-            **_source_metrics(summary, "gradeadjusted", "gap", "rap"),
-            **_source_metrics(dto, "gradeadjusted", "gap", "rap"),
-        },
         "coordinates": _strip_empty({
             "start": _strip_empty({
                 "latitude": _number(_pick(sources, "startLatitude", "startLat")),
@@ -2432,41 +2577,74 @@ def _compact_activity(
             include_free_text=include_free_text,
         ),
         "average_temperature_c": temperature.get("temperature_c"),
-        "average_temperature_raw": temperature.get("temperature_raw"),
-        "average_temperature_source_unit": temperature.get(
-            "temperature_source_unit"
+        "average_temperature_unconverted": (
+            _strip_empty({
+                "value": temperature.get("temperature_raw"),
+                "source_unit": temperature.get("temperature_source_unit"),
+            })
+            if temperature.get("temperature_c") is None
+            else None
         ),
         "maximum_temperature_c": maximum_temperature.get("temperature_c"),
-        "maximum_temperature_raw": maximum_temperature.get("temperature_raw"),
-        "maximum_temperature_source_unit": maximum_temperature.get(
-            "temperature_source_unit"
+        "maximum_temperature_unconverted": (
+            _strip_empty({
+                "value": maximum_temperature.get("temperature_raw"),
+                "source_unit": maximum_temperature.get("temperature_source_unit"),
+            })
+            if maximum_temperature.get("temperature_c") is None
+            else None
+        ),
+        "minimum_temperature_c": minimum_temperature.get("temperature_c"),
+        "minimum_temperature_unconverted": (
+            _strip_empty({
+                "value": minimum_temperature.get("temperature_raw"),
+                "source_unit": minimum_temperature.get("temperature_source_unit"),
+            })
+            if minimum_temperature.get("temperature_c") is None
+            else None
         ),
         "humidity_pct": _number(
             _pick(activity_data.get("weather", {}), "relativeHumidity")
         ),
+        "wind_speed_m_s": _number(weather.get("windSpeed")),
+        "wind_direction_deg": _number(weather.get("windDirection")),
         "aerobic_training_effect": _number(
             _pick(sources, "aerobicTrainingEffect", "trainingEffect")
         ),
         "anaerobic_training_effect": _number(
             _pick(sources, "anaerobicTrainingEffect")
         ),
+        "training_effect_label": _pick(sources, "trainingEffectLabel"),
+        "aerobic_training_effect_message": _pick(
+            sources, "aerobicTrainingEffectMessage"
+        ),
+        "anaerobic_training_effect_message": _pick(
+            sources, "anaerobicTrainingEffectMessage"
+        ),
         "training_load": _number(_pick(sources, "activityTrainingLoad")),
         "calories_kcal": _number(_pick(sources, "calories")),
         "estimated_sweat_loss_ml": _number(_pick(sources, "waterEstimated")),
+        "vo2_max_ml_kg_min": _number(_pick(sources, "vo2MaxValue")),
+        "average_respiration_rate_brpm": _number(
+            _pick(sources, "averageRespirationRate")
+        ),
+        "stroke_count": _number(_pick(sources, "strokes")),
         "self_evaluation": _normalise_self_evaluation(dto),
         "hr_zones": hr_zones,
         "heart_rate_distribution_quality": hr_distribution,
-        "power_zones": _normalise_zones(
-            activity_data.get("power_zones"),
-            "low_boundary_w",
-        ),
+        "power_zones": _normalise_power_zones(activity_data),
         "laps": laps,
         "lap_source": lap_source if laps else None,
-        "gear": _compact_gear_items(
-            activity_data.get("gear"),
-            reference_secret=reference_secret,
-            include_free_text=include_free_text,
-        ),
+        "interval_summaries": interval_summaries,
+        "gear_refs": list(dict.fromkeys(
+            item.get("gear_ref")
+            for item in _compact_gear_items(
+                activity_data.get("gear"),
+                reference_secret=reference_secret,
+                include_free_text=include_free_text,
+            )
+            if item.get("gear_ref")
+        )),
         "activity_series": activity_series,
         "unmapped_sport_data": _activity_unmapped_sport_data(
             activity_data,
@@ -3787,11 +3965,9 @@ class GarminExporter:
             descriptor.get("source_field")
             for activity in activities_with_unmapped_data
             for descriptor in (
-                (
-                    (
-                        activity.get("unmapped_sport_data") or {}
-                    ).get("details") or {}
-                ).get("unmapped_activity_series") or {}
+                (activity.get("unmapped_sport_data") or {}).get(
+                    "activity_series"
+                ) or {}
             ).get("metric_descriptors", [])
             if isinstance(descriptor, dict) and descriptor.get("source_field")
         })
@@ -3808,9 +3984,6 @@ class GarminExporter:
             ),
         }
         exported_gear = list(_as_list(self.semantic_model.get("gear")))
-        for activity in self.compact_activities:
-            if isinstance(activity, dict):
-                exported_gear.extend(_as_list(activity.get("gear")))
         privacy = quality.setdefault("privacy", {})
         privacy.update({
             "mode": "redact_personal_identifiers",
@@ -4984,17 +5157,6 @@ class GarminExporter:
                 )
                 all_days.append(record)
                 self.compact_daily_records.append(record)
-                sleep = record.get("sleep", {})
-                if not sleep.get("valid_sleep"):
-                    self._quality_add(
-                        "missing_critical_data",
-                        f"No hay sueño real disponible para {ds}.",
-                    )
-                if not record.get("hrv"):
-                    self._quality_add(
-                        "missing_critical_data",
-                        f"No hay VFC disponible para {ds}.",
-                    )
             else:
                 self.md.append(f"{ds}\n")
                 for key in endpoint_keys:
@@ -5371,21 +5533,21 @@ class GarminExporter:
                     "duplicate_sources_removed",
                     "Se unificaron summary y detail.summaryDTO de cada actividad.",
                 )
+                self._quality_add(
+                    "duplicate_sources_removed",
+                    "Los resúmenes de intervalos se fusionaron por tipo, cantidad, distancia y duración; se priorizaron split_summaries y detail.splitSummaries sobre summary.splitSummaries.",
+                )
+                self._quality_add(
+                    "duplicate_sources_removed",
+                    "totalAscent y totalDescent se trataron como metros; no se aplicó una conversión general. Los conflictos se resolvieron conservando la fuente prioritaria.",
+                )
                 if any(
                     activity.get("self_evaluation") is not None
                     for activity in all_activities
                 ):
                     self._quality_add(
                         "unit_conversions",
-                        "directWorkoutRpe se interpretó en pasos de diez (10–100) y se normalizó a perceived_exertion_1_10; el valor raw queda en self_evaluation.",
-                    )
-                if any(
-                    activity.get("average_temperature_source_unit") == "fahrenheit"
-                    for activity in all_activities
-                ):
-                    self._quality_add(
-                        "unit_conversions",
-                        "weather.temp se convirtió de Fahrenheit a Celsius; las temperaturas directas del sensor se conservaron como Celsius.",
+                        "directWorkoutRpe se interpretó en pasos de diez (10–100) y se normalizó a perceived_exertion_1_10; los valores raw se omitieron del compacto.",
                     )
             else:
                 _section_nodata(self.md, "Activities")
@@ -5784,10 +5946,6 @@ class GarminExporter:
                     "Garmin no devolvió una lista global de equipamiento.",
                 )
                 return
-            _enrich_activity_gear_from_catalog(
-                self.compact_activities,
-                gear,
-            )
             if self.compact_activities:
                 self._remember_compact(
                     "activities",

@@ -179,6 +179,8 @@ class EvaluationAndHeartRateTests(unittest.TestCase):
         })
         self.assertEqual(1, result["perceived_exertion_1_10"])
         self.assertEqual("normal", result["feeling"])
+        self.assertNotIn("perceived_exertion_raw", result)
+        self.assertNotIn("feeling_raw", result)
 
     def test_rpe_raw_50_and_100_map_to_five_and_ten(self):
         five = _normalise_self_evaluation({"directWorkoutRpe": 50})
@@ -332,12 +334,9 @@ class RegressionTests(unittest.TestCase):
 
     def test_gear_remains_associated(self):
         result = _compact_activity(compact_activity_fixture())
-        gear = result["gear"][0]
-        self.assertRegex(gear["gear_ref"], r"^gear_[0-9a-f]{12}$")
-        self.assertEqual("Zapatillas anónimas", gear["gear_name"])
-        self.assertEqual("Saucony", gear["manufacturer"])
-        self.assertEqual("Endorphin Speed 4", gear["model"])
-        self.assertNotIn("custom_name", gear)
+        self.assertEqual(1, len(result["gear_refs"]))
+        self.assertRegex(result["gear_refs"][0], r"^gear_[0-9a-f]{12}$")
+        self.assertNotIn("gear", result)
 
     def test_future_metrics_stay_in_current_snapshot(self):
         result, _ = _compact_training(
@@ -382,7 +381,9 @@ class RegressionTests(unittest.TestCase):
             garmin_export._compact_mode = previous_compact
             garmin_export._limiter = previous_limiter
         self.assertTrue(exporter.compact_daily_records)
-        self.assertTrue(exporter.data_quality["missing_critical_data"])
+        self.assertFalse(exporter.data_quality["missing_critical_data"])
+        self.assertNotIn("sleep", exporter.compact_daily_records[0])
+        self.assertNotIn("hrv", exporter.compact_daily_records[0])
 
     def test_rounding_happens_only_in_compact_serialisation(self):
         previous = garmin_export._compact_mode
