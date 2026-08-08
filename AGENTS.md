@@ -188,6 +188,24 @@ fechas y horas reales, números reales y tablas de Excel con filtros. No deben
 contener JSON, rutas internas ni identificadores visibles. Las ausencias se
 mantienen como celdas vacías. Las hojas vacías no se crean.
 
+La vista humana no clasifica una sesión como intervalos por encontrar
+`INTERVAL_ACTIVE`, `RWD_RUN`, vueltas automáticas o un resumen de intervalos.
+Necesita intención indicada por la persona, metadatos estructurados fiables,
+bloques repetidos de trabajo/recuperación o un título inequívoco. Los valores
+centinela negativos de Garmin se convierten en ausencias antes de calcular las
+métricas visibles y su cobertura, sin alterar el modelo semántico del TXT.
+
+`INTERVALOS` muestra únicamente sesiones clasificadas como intervalos o tempo,
+o actividades con bloques planificados inequívocos. Excluye resúmenes generales
+y pausas automáticas, deduplica con tolerancia a redondeos y presenta
+`INTERVAL_ACTIVE` como trabajo activo cuando resume las repeticiones. Los
+totales ya presentes en `ACTIVIDADES` no se repiten.
+
+La cobertura visible de autoevaluación utiliza la misma población que los KPI:
+actividades válidas después de excluir microactividades. Los mensajes técnicos
+originales de calidad permanecen en las hojas ocultas; `CALIDAD DATOS` solo
+muestra explicaciones comprensibles.
+
 `ACTIVIDADES`, `SEMANAS` y `SALUD DIARIA` muestran inicialmente solo las
 columnas principales. Las columnas avanzadas se conservan en grupos plegados,
 nunca se eliminan. Los códigos Garmin visibles se traducen sin distinguir
@@ -471,7 +489,7 @@ capturar una ventana asociada a un perfil real.
 dotnet restore GarminDataExport.slnx
 dotnet build GarminDataExport.slnx --no-restore
 dotnet run --project GarminDataExport.csproj -- --help
-.\scripts\Build-PortableRelease.ps1 -Version 3.5.1
+.\scripts\Build-PortableRelease.ps1 -Version 3.5.2
 ```
 
 También:

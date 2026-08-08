@@ -169,6 +169,7 @@ XLSX_TRANSLATIONS = {
         "INTERVAL_ACTIVE": "Activo",
         "INTERVAL": "Intervalo",
         "INTERVAL_REST": "Recuperación",
+        "INTERVAL_RECOVERY": "Recuperación",
         "INTERVAL_WARMUP": "Calentamiento",
         "INTERVAL_COOLDOWN": "Enfriamiento",
         "REST": "Recuperación",
@@ -184,7 +185,7 @@ XLSX_QUALITY_NAMES = {
     "resting_heart_rate_bpm": "Frecuencia cardiaca en reposo",
     "average_stress": "Estrés medio",
     "body_battery_high": "Body Battery máximo",
-    "self_evaluation": "Autoevaluación de actividades",
+    "self_evaluation": "Autoevaluación de actividades válidas",
     "garmin_training_load": "Carga Garmin",
 }
 
@@ -2666,6 +2667,45 @@ def render_xlsx(model: dict, path: Path) -> None:
     composition = _section(model, "body_composition", []) or []
     quality = _section(model, "data_quality", {}) or {}
     profile = _section(model, "profile", {}) or {}
+
+    # Garmin utiliza valores negativos como centinelas en algunas respuestas.
+    # La copia visible evita tratarlos como mediciones sin modificar el modelo
+    # semántico que alimenta el TXT ni las hojas técnicas de trazabilidad.
+    visible_days = copy.deepcopy(days)
+    non_negative_daily_fields = {
+        "steps", "distance_m", "active_calories_kcal", "total_calories_kcal",
+        "moderate_intensity_minutes", "vigorous_intensity_minutes",
+        "resting_heart_rate_bpm", "average_stress", "maximum_stress",
+        "body_battery_high", "body_battery_low", "body_battery_charged",
+        "body_battery_drained", "average_spo2_pct", "lowest_spo2_pct",
+        "average_waking_respiration_brpm", "average_sleep_respiration_brpm",
+    }
+    non_negative_sleep_fields = {
+        "total_sleep_s", "awake_s", "light_sleep_s", "deep_sleep_s",
+        "rem_sleep_s", "nap_time_s", "sleep_score",
+        "average_sleep_heart_rate_bpm", "average_sleep_stress",
+        "average_sleep_spo2_pct",
+    }
+    non_negative_hrv_fields = {
+        "overnight_average_ms", "highest_five_min_average_ms",
+        "weekly_average_ms", "baseline_balanced_low_ms",
+        "baseline_balanced_high_ms",
+    }
+
+    def clear_negative_fields(item, fields):
+        if not isinstance(item, dict):
+            return
+        for field in fields:
+            value = _number(item.get(field))
+            if value is not None and value < 0:
+                item[field] = None
+
+    for visible_day in visible_days:
+        clear_negative_fields(visible_day, non_negative_daily_fields)
+        clear_negative_fields(visible_day.get("sleep"), non_negative_sleep_fields)
+        clear_negative_fields(visible_day.get("hrv"), non_negative_hrv_fields)
+
+    visible_quality = copy.deepcopy(quality)
     descriptor_rows, prepared_series, series_columns = (
         _prepare_xlsx_activity_series(activities)
     )
@@ -2839,6 +2879,15 @@ def render_xlsx(model: dict, path: Path) -> None:
                         "get_hrv_data": "Datos de VFC",
                         "dailySleepDTO": "Datos diarios de sueño",
                         "hrvSummary": "Resumen de VFC",
+                        "sleepNeed.actual": "Necesidad de sueño",
+                        "recoveryTime": "Tiempo de recuperación",
+                        "hrvWeeklyAverage": "Media semanal de VFC",
+                        "weather.temp": "Temperatura meteorológica",
+                        "directWorkoutRpe": "Esfuerzo percibido registrado",
+                        "perceived_exertion_1_10": "Esfuerzo percibido",
+                        "summaryDTO": "Resumen de actividad",
+                        "lapDTOs": "Vueltas de la actividad",
+                        "speed_raw": "Velocidad registrada",
                         "gear_type": "Tipo de equipamiento",
                         "lap_type": "Tipo de vuelta",
                         "session_type": "Tipo de sesión",
@@ -2856,14 +2905,95 @@ def render_xlsx(model: dict, path: Path) -> None:
         text_value = str(value)
         if text_value == "Consulta Data Quality.coverage antes de interpretar promedios.":
             return "Revisa la cobertura de datos antes de interpretar promedios."
+
+        # Los mensajes originales permanecen íntegros en TÉCNICO - MODELO. En
+        # la hoja visible se agrupan por su significado para que una persona no
+        # tenga que interpretar nombres de endpoints, DTO o rutas JSON.
+        technical_text = text_value.casefold()
+        explanations = []
+
+        def explain_when(tokens, explanation):
+            if any(token.casefold() in technical_text for token in tokens):
+                if explanation not in explanations:
+                    explanations.append(explanation)
+
+        explain_when(
+            ("epochs", "sleep raw", "sleep timestamp"),
+            "Se convirtieron las marcas de tiempo del sueño a fecha y hora local.",
+        )
+        explain_when(
+            ("lactate-threshold", "lactate_threshold", "lactate threshold"),
+            "La velocidad del umbral de lactato se convirtió a metros por segundo.",
+        )
+        explain_when(
+            ("splits.vueltas", "typed_splits.splits", "lapdtos"),
+            "Se evitó repetir información de vueltas procedente de distintas fuentes de Garmin.",
+        )
+        explain_when(
+            ("summarydto", "detail", "summary/detail"),
+            "Se unificaron los resúmenes generales de cada actividad.",
+        )
+        explain_when(
+            ("split_summaries", "splitsummary", "split summaries"),
+            "Se eliminaron resúmenes de intervalos duplicados.",
+        )
+        explain_when(
+            ("totalascent", "totaldescent"),
+            "El ascenso y descenso acumulados se interpretaron en metros.",
+        )
+        explain_when(
+            ("speed_raw", "raw speed"),
+            "Las velocidades deportivas se conservaron con unidades claras.",
+        )
+        explain_when(
+            ("endpoint",),
+            "Algunos datos de Garmin no estuvieron disponibles durante la descarga.",
+        )
+        if explanations:
+            friendly = " ".join(explanations)
+            date_range = re.search(
+                r"(\d{4}-\d{2}-\d{2})(?:\s*(?:a|/|\.\.|—|-)\s*"
+                r"(\d{4}-\d{2}-\d{2}))?",
+                text_value,
+            )
+            if date_range:
+                first = excel_date(date_range.group(1))
+                last = excel_date(date_range.group(2)) if date_range.group(2) else None
+                if first:
+                    period = first.strftime("%d/%m/%Y")
+                    if last:
+                        period += f"–{last.strftime('%d/%m/%Y')}"
+                    friendly += f" Periodo: {period}."
+            return friendly
+
         replacements = {
             "get_sleep_data": "datos de sueño",
             "get_hrv_data": "datos de VFC",
             "dailySleepDTO": "datos diarios de sueño",
             "hrvSummary": "resumen de VFC",
+            "sleepNeed.actual": "necesidad de sueño",
+            "recoveryTime": "tiempo de recuperación",
+            "hrvWeeklyAverage": "media semanal de VFC",
+            "weather.temp": "temperatura meteorológica",
+            "directWorkoutRpe": "esfuerzo percibido registrado",
+            "perceived_exertion_1_10": "esfuerzo percibido",
+            "summaryDTO": "resumen de actividad",
+            "lapDTOs": "vueltas de la actividad",
+            "speed_raw": "velocidad registrada",
             "gear_type": "tipo de equipamiento",
             "lap_type": "tipo de vuelta",
             "session_type": "tipo de sesión",
+            "raw": "dato original",
+            "epochs": "marcas de tiempo",
+            "endpoint": "origen de datos",
+            "lactate-threshold": "umbral de lactato",
+            "splits.vueltas": "vueltas",
+            "typed_splits.splits": "vueltas",
+            "summary": "resumen",
+            "detail": "detalle deportivo",
+            "split_summaries": "resúmenes de intervalos",
+            "totalAscent": "ascenso acumulado",
+            "totalDescent": "descenso acumulado",
         }
         for technical, friendly in replacements.items():
             text_value = re.sub(
@@ -2879,7 +3009,7 @@ def render_xlsx(model: dict, path: Path) -> None:
 
         text_value = re.sub(r"\b\d{4}-\d{2}-\d{2}\b", spanish_date, text_value)
         text_value = re.sub(
-            r"(\d{2}/\d{2}/\d{4})\s*(?:a|\.\.|—|-)\s*(\d{2}/\d{2}/\d{4})",
+            r"(\d{2}/\d{2}/\d{4})\s*(?:a|/|\.\.|—|-)\s*(\d{2}/\d{2}/\d{4})",
             r"\1–\2",
             text_value,
         )
@@ -2942,6 +3072,9 @@ def render_xlsx(model: dict, path: Path) -> None:
 
     def append_table(sheet, rows, columns, table_base, start_row=1):
         headers = [item["header"] for item in columns]
+        # Una altura fija evita que Excel expanda la cabecera por columnas
+        # avanzadas ocultas. El ajuste permite dos líneas en los títulos largos.
+        sheet.row_dimensions[start_row].height = 33
         for item in columns:
             letter = get_column_letter(columns.index(item) + 1)
             sheet.column_dimensions[letter].width = item["width"]
@@ -3097,36 +3230,208 @@ def render_xlsx(model: dict, path: Path) -> None:
         classification = activity.get("classification") or {}
         raw_type = str(classification.get("type") or "unknown").strip()
         normalized = raw_type.casefold()
+        evidence = {
+            str(item).casefold()
+            for item in classification.get("evidence", []) or []
+        }
+
+        # El tipo previsto por la persona es la fuente de mayor prioridad.
+        if (
+            classification.get("source") == "user_provided"
+            or "manual_intended_session_type" in evidence
+        ):
+            return translate("session_type", raw_type) or "Sin clasificar"
+
+        def folded(value):
+            plain = unicodedata.normalize("NFKD", str(value or ""))
+            plain = "".join(
+                character for character in plain
+                if not unicodedata.combining(character)
+            )
+            return re.sub(r"\s+", " ", plain.casefold()).strip()
+
+        name = folded(activity.get("name"))
+        event_type = folded(activity.get("garmin_event_type"))
+        if "carrera facil" in name:
+            return "Rodaje fácil"
+        if "carrera larga" in name or "tirada larga" in name:
+            return "Tirada larga"
+
+        competition_name = any(token in name for token in (
+            "maraton", "marathon", "media maraton", "half marathon",
+            "1/2 maraton", "competicion",
+        ))
+        if (
+            normalized == "race"
+            or "race" in event_type
+            or "competition" in event_type
+            or competition_name
+        ):
+            return "Competición"
+        if "tempo" in name:
+            return "Tempo"
+        if any(token in name for token in (
+            "intervalos", "series", "repeticiones",
+        )):
+            return "Intervalos"
+
+        # Solo se aceptan metadatos nominales explícitos del entrenamiento. La
+        # mera existencia de interval_summaries, vueltas automáticas,
+        # INTERVAL_ACTIVE o RWD_RUN no constituye evidencia.
+        structured_text = " ".join(
+            folded(activity.get(field))
+            for field in (
+                "workout_name", "structured_workout_name", "workout_title",
+                "training_plan_name", "workout_type",
+            )
+            if activity.get(field)
+        )
+        if any(token in structured_text for token in (
+            "interval", "series", "repeticion", "repeat",
+        )):
+            return "Intervalos"
+        if "tempo" in structured_text:
+            return "Tempo"
+
+        step_types = [
+            folded(lap.get("step_type"))
+            for lap in activity.get("laps", []) or []
+            if isinstance(lap, dict)
+        ]
+        work_steps = sum(
+            any(token in step for token in ("work", "repeat", "repeticion"))
+            for step in step_types
+        )
+        recovery_steps = sum(
+            any(token in step for token in ("recovery", "rest", "recuperacion"))
+            for step in step_types
+        )
+        if work_steps >= 2 and recovery_steps >= 1:
+            return "Intervalos"
+
+        # Las reglas conservadoras ya existentes para rodaje fácil, tirada
+        # larga, fuerza y entrenamiento cruzado siguen siendo válidas. La
+        # clasificación interval derivada de structured_lap_steps se descarta.
+        if normalized == "interval":
+            return "Sin clasificar"
         if normalized in {"", "none", "unknown", "uncategorized"}:
             return "Sin clasificar"
-        if normalized == "interval":
-            evidence = {
-                str(item).casefold()
-                for item in classification.get("evidence", []) or []
-            }
-            explicit = (
-                classification.get("source") == "user_provided"
-                or "manual_intended_session_type" in evidence
-                or "structured_lap_steps" in evidence
-            )
-            if not explicit:
-                return "Sin clasificar"
         return translate("session_type", raw_type)
 
-    def interval_level(interval):
+    def interval_role(interval):
         raw_type = str(interval.get("interval_type") or "").strip().casefold()
-        if raw_type in {"rwd_run", "run"}:
-            return "Total de actividad"
-        if raw_type in {
-            "rwd_walk", "rwd_stand", "rest", "interval_rest", "recovery"
-        }:
-            return "Pausa"
-        if raw_type in {
-            "warmup", "cooldown", "interval_warmup", "interval_cooldown",
-            "active",
-        }:
-            return "Bloque"
-        return "Intervalo"
+        if raw_type in {"interval_warmup", "warmup"}:
+            return "warmup"
+        if raw_type in {"interval_cooldown", "cooldown"}:
+            return "cooldown"
+        if raw_type in {"interval_recovery", "interval_rest", "recovery"}:
+            return "recovery"
+        if raw_type in {"interval_active", "interval", "work", "repeat"}:
+            return "work"
+        if raw_type == "rest":
+            return "pause"
+        if raw_type in {"rwd_run", "run", "active"}:
+            return "total_candidate"
+        return "automatic_or_generic"
+
+    def interval_values_are_close(first, second):
+        """Compara resúmenes tolerando pausas breves y redondeos de Garmin."""
+        first_count = number(first.get("interval_count"))
+        second_count = number(second.get("interval_count"))
+        if (
+            first_count is not None
+            and second_count is not None
+            and first_count != second_count
+        ):
+            return False
+        for field, absolute_tolerance in (
+            ("distance_m", 100.0),
+            ("duration_s", 60.0),
+        ):
+            left = number(first.get(field))
+            right = number(second.get(field))
+            if left is None or right is None:
+                continue
+            tolerance = max(
+                absolute_tolerance,
+                max(abs(left), abs(right)) * 0.02,
+            )
+            if abs(left - right) > tolerance:
+                return False
+        return True
+
+    def visible_interval_items(activity):
+        """Devuelve solo bloques útiles para un corredor o entrenador."""
+        intervals = [
+            item for item in activity.get("interval_summaries", []) or []
+            if isinstance(item, dict)
+        ]
+        if not intervals:
+            return []
+
+        session_type = visible_session_type(activity)
+        roles = [interval_role(item) for item in intervals]
+        structured = (
+            session_type in {"Intervalos", "Tempo"}
+            or "warmup" in roles
+            or "cooldown" in roles
+            or ("work" in roles and "recovery" in roles)
+        )
+        if not structured:
+            return []
+
+        labels = {
+            "warmup": ("Calentamiento", "Bloque planificado"),
+            "work": ("Trabajo activo", "Resumen de bloques"),
+            "recovery": ("Recuperación", "Bloque planificado"),
+            "pause": ("Pausa", "Bloque planificado"),
+            "cooldown": ("Enfriamiento", "Bloque planificado"),
+            "total": ("Total de actividad", "Total de actividad"),
+        }
+        selected = []
+        for interval in intervals:
+            role = interval_role(interval)
+            if role not in {"warmup", "work", "recovery", "pause", "cooldown"}:
+                continue
+            if role == "pause":
+                duration = number(interval.get("duration_s")) or 0.0
+                count = number(interval.get("interval_count")) or 0.0
+                if duration < 30 and count < 1:
+                    continue
+            if any(
+                existing[0] == role
+                and interval_values_are_close(existing[1], interval)
+                for existing in selected
+            ):
+                continue
+            selected.append((role, interval))
+
+        # Los totales ya visibles en ACTIVIDADES se omiten. Solo se conserva
+        # uno cuando a la actividad le falta su resumen general y Garmin sí lo
+        # proporciona, con una prioridad explícita y siempre al final.
+        activity_has_total = (
+            number(activity.get("distance_m")) is not None
+            or number(activity.get("duration_s")) is not None
+        )
+        if not activity_has_total:
+            total_priority = {"run": 0, "rwd_run": 1, "active": 2}
+            total_candidates = sorted(
+                (
+                    item for item in intervals
+                    if interval_role(item) == "total_candidate"
+                ),
+                key=lambda item: total_priority.get(
+                    str(item.get("interval_type") or "").strip().casefold(),
+                    99,
+                ),
+            )
+            if total_candidates:
+                selected.append(("total", total_candidates[0]))
+
+        return [
+            (interval, *labels[role])
+            for role, interval in selected
+        ]
 
     def interval_pace(value, interval):
         distance = number(interval.get("distance_m"))
@@ -3142,8 +3447,35 @@ def render_xlsx(model: dict, path: Path) -> None:
             return None
         return excel_time(pace)
 
+    def lap_pace(value, lap):
+        distance = number(lap.get("distance_m"))
+        moving = number(lap.get("moving_duration_s"))
+        pace = number(value)
+        if (
+            pace is None
+            or distance is None
+            or distance < 100
+            or (moving is not None and moving <= 0)
+            or pace > 3600
+        ):
+            return None
+        return excel_time(pace)
+
     microactivities = [item for item in activities if is_microactivity(item)]
     coach_activities = [item for item in activities if not is_microactivity(item)]
+    valid_evaluated = sum(
+        1 for item in coach_activities if item.get("self_evaluation")
+    )
+    visible_quality.setdefault("coverage", {})["self_evaluation"] = {
+        "available_activities": valid_evaluated,
+        "expected_activities": len(coach_activities),
+        "missing_activities": len(coach_activities) - valid_evaluated,
+        "coverage_pct": (
+            round(valid_evaluated * 100.0 / len(coach_activities), 1)
+            if coach_activities
+            else None
+        ),
+    }
     period_start = _parse_date(
         nested(summary, "period.start_date") or metadata.get("start_date")
     )
@@ -3151,16 +3483,21 @@ def render_xlsx(model: dict, path: Path) -> None:
         nested(summary, "period.end_date") or metadata.get("end_date")
     )
     if period_start and period_end:
+        visible_quality.setdefault("coverage", {})["average_stress"] = _coverage(
+            visible_days,
+            _date_range(period_start, period_end),
+            _DAILY_METRICS["average_stress"],
+        )
         coach_weeks = build_weekly_timeline(
             coach_activities,
-            days,
+            visible_days,
             period_start,
             period_end,
             reference_date=period_end,
         )
         coach_summary = build_period_summary(
             coach_activities,
-            days,
+            visible_days,
             period_start,
             period_end,
             coach_weeks,
@@ -3303,12 +3640,12 @@ def render_xlsx(model: dict, path: Path) -> None:
             "activity_ref": reference,
         })
 
-        for interval in activity.get("interval_summaries", []) or []:
+        for interval, interval_name, level in visible_interval_items(activity):
             interval_rows.append({
                 "date": activity_date,
                 "activity": activity_name,
-                "type": translate("interval_type", interval.get("interval_type")),
-                "level": interval_level(interval),
+                "type": interval_name,
+                "level": level,
                 "count": interval.get("interval_count"),
                 "distance_km": excel_km(interval.get("distance_m")),
                 "duration": excel_time(interval.get("duration_s")),
@@ -3337,8 +3674,8 @@ def render_xlsx(model: dict, path: Path) -> None:
                 "distance_m": lap.get("distance_m"),
                 "duration": excel_time(lap.get("duration_s")),
                 "moving_time": excel_time(lap.get("moving_duration_s")),
-                "average_pace": excel_time(lap.get("average_pace_s_per_km")),
-                "best_pace": excel_time(lap.get("best_pace_s_per_km")),
+                "average_pace": lap_pace(lap.get("average_pace_s_per_km"), lap),
+                "best_pace": lap_pace(lap.get("best_pace_s_per_km"), lap),
                 "average_hr": lap.get("average_heart_rate_bpm"),
                 "maximum_hr": lap.get("maximum_heart_rate_bpm"),
                 "average_power": lap.get("average_power_w"),
@@ -3394,7 +3731,7 @@ def render_xlsx(model: dict, path: Path) -> None:
 
     daily_rows = []
     habit_rows = []
-    for item in days:
+    for item in visible_days:
         sleep = item.get("sleep") or {}
         hrv = item.get("hrv") or {}
         daily_rows.append({
@@ -3552,7 +3889,7 @@ def render_xlsx(model: dict, path: Path) -> None:
         })
 
     quality_rows = []
-    for metric, values in (quality.get("coverage") or {}).items():
+    for metric, values in (visible_quality.get("coverage") or {}).items():
         if not isinstance(values, dict):
             continue
         available = values.get("available_days", values.get("available_activities"))
@@ -3573,7 +3910,7 @@ def render_xlsx(model: dict, path: Path) -> None:
         for period_value in values.get("missing_date_ranges") or []:
             if isinstance(period_value, str):
                 match = re.fullmatch(
-                    r"(\d{4}-\d{2}-\d{2})(?:\s*(?:a|\.\.|—|-)\s*(\d{4}-\d{2}-\d{2}))?",
+                    r"(\d{4}-\d{2}-\d{2})(?:\s*(?:a|/|\.\.|—|-)\s*(\d{4}-\d{2}-\d{2}))?",
                     period_value.strip(),
                 )
                 if match:
@@ -3893,7 +4230,7 @@ def render_xlsx(model: dict, path: Path) -> None:
         ("Carga Garmin total", nested(coach_summary, "load.garmin_training_load_total"), "0.0", "puntos Garmin"),
         ("Esfuerzo percibido medio", nested(coach_summary, "load.average_rpe_1_10"), "0.0", "1–10"),
         ("Cobertura de autoevaluación", excel_pct(nested(coach_summary, "load.self_evaluation_coverage_pct")), "0.0%", "%"),
-        ("Cobertura de sueño", excel_pct(nested(quality, "coverage.sleep_duration_s.coverage_pct")), "0.0%", "%"),
+        ("Cobertura de sueño", excel_pct(nested(visible_quality, "coverage.sleep_duration_s.coverage_pct")), "0.0%", "%"),
         ("Semanas restantes para la carrera", event.get("weeks_remaining"), "0.0", "semanas"),
     ]
     comparison = compare_complete_week_blocks(coach_weeks)
@@ -4223,8 +4560,8 @@ def render_xlsx(model: dict, path: Path) -> None:
             current_quality_row += 1
 
     append_quality_section("Avisos", [
-        *(quality.get("warnings") or []),
-        *(quality.get("issues") or []),
+        *(visible_quality.get("warnings") or []),
+        *(visible_quality.get("issues") or []),
         *(
             [
                 f"Se conservaron {len(microactivities)} registros muy breves en "
@@ -4242,9 +4579,9 @@ def render_xlsx(model: dict, path: Path) -> None:
             if microactivities else []
         ),
     ])
-    append_quality_section("Limitaciones", quality.get("limitations") or [])
-    append_quality_section("Transformaciones aplicadas", quality.get("transformations") or [])
-    privacy = quality.get("privacy") or {}
+    append_quality_section("Limitaciones", visible_quality.get("limitations") or [])
+    append_quality_section("Transformaciones aplicadas", visible_quality.get("transformations") or [])
+    privacy = visible_quality.get("privacy") or {}
     privacy_lines = [
         "La identidad y los identificadores personales se ocultan automáticamente.",
         "Las coordenadas y los datos deportivos se conservan para el análisis.",
@@ -4252,7 +4589,7 @@ def render_xlsx(model: dict, path: Path) -> None:
         f"Política aplicada: {translate('privacy', privacy.get('mode')) or 'Automática'}.",
     ]
     append_quality_section("Privacidad", privacy_lines)
-    append_quality_section("Deduplicaciones", quality.get("deduplication") or [])
+    append_quality_section("Deduplicaciones", visible_quality.get("deduplication") or [])
     append_quality_section("Series temporales en Excel", [
         (
             f"Se incluyeron {available_series_samples} muestras en la hoja "

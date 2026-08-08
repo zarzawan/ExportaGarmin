@@ -1,3 +1,4 @@
+import copy
 import json
 import tempfile
 import unittest
@@ -24,22 +25,23 @@ class HumanXlsxReportTests(unittest.TestCase):
         from tests.test_compact_reduction import CompactReductionRegressionTests
 
         source_case = CompactReductionRegressionTests(methodName="runTest")
-        _, activities = source_case._corrected_92_activity_dataset()
+        _, activities = source_case._dataset()
         cls.start = source_case.START
         cls.end = source_case.END
 
         target_running_distance = 327_579.6
         running = [item for item in activities if item.get("sport") == "running"]
-        # Dos registros accidentales de pocos segundos en un mismo día. Se
-        # conservan como actividades, pero no deben alterar los indicadores.
+        cycling = [item for item in activities if item.get("sport") == "cycling"]
+        # Dos registros accidentales de pocos segundos en un mismo día: uno de
+        # carrera y otro de ciclismo. Se conservan, pero no alteran indicadores.
         micro_date = running[0]["date"]
-        for index, activity in enumerate(running[:2]):
+        for index, activity in enumerate((running[0], cycling[0])):
             activity["date"] = micro_date
             activity["distance_m"] = 0.0
             activity["duration_s"] = 5.0 - index
             activity["moving_duration_s"] = 5.0 - index
-        running[2]["sport"] = "trail_running"
-        valid_running = running[2:]
+        running[1]["sport"] = "trail_running"
+        valid_running = running[1:]
         per_run = round(target_running_distance / len(valid_running), 6)
         assigned = 0.0
         for index, activity in enumerate(valid_running):
@@ -51,7 +53,6 @@ class HumanXlsxReportTests(unittest.TestCase):
             activity["distance_m"] = distance
             assigned += distance
 
-        # 845 zonas: 17 actividades con diez y 75 con nueve.
         for activity_index, activity in enumerate(activities):
             activity["hr_zones"] = [
                 {
@@ -70,15 +71,26 @@ class HumanXlsxReportTests(unittest.TestCase):
                 }
                 for zone in range(1, power_count + 1)
             ]
-            if activity_index % 3 == 0:
-                activity["self_evaluation"] = {
-                    "perceived_exertion_1_10": 5.0,
-                    "feeling": "good",
-                }
+            activity.pop("self_evaluation", None)
             activity["training_load"] = 60.0 + activity_index
             activity["training_effect_label"] = "AEROBIC_BASE"
             activity["start_time_bucket"] = "morning"
-        activities[0]["self_evaluation"]["feeling"] = "strong"
+        valid_activities = [
+            activity for activity in activities
+            if activity not in (running[0], cycling[0])
+        ]
+        for activity in valid_activities[:43]:
+            activity["self_evaluation"] = {
+                "perceived_exertion_1_10": 5.0,
+                "feeling": "good",
+            }
+        # Los dos registros breves tienen autoevaluación a propósito: así se
+        # demuestra que quedan fuera tanto del numerador como del denominador.
+        for activity in (running[0], cycling[0]):
+            activity["self_evaluation"] = {
+                "perceived_exertion_1_10": 2.0,
+                "feeling": "strong",
+            }
         activities[1]["training_effect_label"] = "Other"
 
         gear = []
@@ -177,7 +189,7 @@ class HumanXlsxReportTests(unittest.TestCase):
         }
         journal = [
             {
-                "date": (cls.start + timedelta(days=index)).isoformat(),
+                "date": activities[index]["date"],
                 "activity_ref": activities[index]["activity_ref"],
                 "note": "Nota ficticia = no es fórmula" if index == 0 else f"Nota ficticia {index + 1}",
                 "intended_session_type": "easy" if index % 2 == 0 else "interval",
@@ -185,6 +197,7 @@ class HumanXlsxReportTests(unittest.TestCase):
             }
             for index in range(6)
         ]
+        journal[5]["date"] = (cls.start + timedelta(days=90)).isoformat()
         journal[0]["intended_session_type"] = None
         journal.append({
             "date": journal[0]["date"],
@@ -208,31 +221,178 @@ class HumanXlsxReportTests(unittest.TestCase):
             race_context,
             journal,
         )
-        extensions["activities"][2]["classification"] = {
-            "type": "uncategorized",
-            "source": "insufficient_evidence",
-            "confidence": 0.0,
-            "evidence": [],
-        }
-        first_interval = extensions["activities"][0]["interval_summaries"][0]
-        first_interval.update({
-            "interval_type": "INTERVAL",
-            "distance_m": 50.0,
-            "moving_duration_s": 1.0,
-            "average_pace_s_per_km": 17_023.0,
-            "moving_pace_s_per_km": 46_663.0,
-            "best_pace_s_per_km": 9_999.0,
-            "grade_adjusted_pace_s_per_km": 8_888.0,
-        })
+        classified = extensions["activities"]
+
+        def set_classification(index, session_type, name, source="user_provided"):
+            activity = classified[index]
+            activity["name"] = name
+            activity["garmin_event_type"] = (
+                "race" if session_type == "race" else "uncategorized"
+            )
+            activity["classification"] = {
+                "type": session_type,
+                "source": source,
+                "confidence": 1.0 if source == "user_provided" else 0.0,
+                "evidence": (
+                    ["manual_intended_session_type"]
+                    if source == "user_provided" else []
+                ),
+            }
+
+        # Distribución exacta del caso ficticio: 44 sin clasificar, 4 de
+        # intervalos, 3 tempo, 6 fáciles, 3 largas, 1 competición,
+        # 29 cruzadas y 1 fuerza.
+        set_classification(0, "unknown", "Registro breve de carrera", "insufficient_evidence")
+        for index in range(1, 5):
+            set_classification(index, "interval", f"S{index} Intervalos - Repeticiones")
+        for index in range(5, 8):
+            set_classification(index, "tempo", f"S{index - 4} Tempo")
+        for index in range(8, 14):
+            set_classification(index, "easy", f"Carrera fácil {index - 7}")
+        for index in range(14, 17):
+            set_classification(index, "long_run", f"Tirada larga {index - 13}")
+        set_classification(17, "race", "Rock and roll 1/2 maratón 2026")
+        set_classification(18, "unknown", "Entrenamiento en cinta", "insufficient_evidence")
+        set_classification(19, "unknown", "Base", "insufficient_evidence")
+        for index in range(20, 60):
+            set_classification(index, "unknown", f"Carrera continua {index}", "insufficient_evidence")
+        set_classification(60, "unknown", "Registro breve de ciclismo", "insufficient_evidence")
+        for index in range(61, 76):
+            set_classification(index, "cross_training", f"Ciclismo {index - 60}")
+        set_classification(76, "strength", "Fuerza")
+        for index in range(77, 91):
+            set_classification(index, "cross_training", f"Caminar {index - 76}")
+
+        # Las 52 carreras no estructuradas contienen resúmenes agregados de
+        # Garmin. No deben aparecer en INTERVALOS.
+        for index in [0, *range(8, 60)]:
+            activity = classified[index]
+            activity["interval_summaries"] = [
+                {
+                    "interval_type": "INTERVAL_ACTIVE",
+                    "interval_count": 1,
+                    "distance_m": activity.get("distance_m"),
+                    "duration_s": activity.get("duration_s"),
+                    "moving_duration_s": activity.get("moving_duration_s"),
+                },
+                {
+                    "interval_type": "RWD_RUN",
+                    "interval_count": 1,
+                    "distance_m": activity.get("distance_m"),
+                    "duration_s": activity.get("duration_s"),
+                    "moving_duration_s": activity.get("moving_duration_s"),
+                },
+            ]
+
+        # Siete sesiones realmente estructuradas. Los totales duplicados y la
+        # pausa automática se incluyen en la entrada para comprobar el filtro.
+        for index in range(1, 8):
+            activity = classified[index]
+            activity["interval_summaries"] = [
+                {
+                    "interval_type": "INTERVAL_WARMUP",
+                    "interval_count": 1,
+                    "distance_m": 1_500.0,
+                    "duration_s": 600.0,
+                    "moving_duration_s": 590.0,
+                },
+                {
+                    "interval_type": "INTERVAL_ACTIVE",
+                    "interval_count": 6,
+                    "distance_m": 50.0 if index == 1 else 4_800.0,
+                    "duration_s": 1_440.0,
+                    "moving_duration_s": 1.0 if index == 1 else 1_420.0,
+                    "average_pace_s_per_km": 17_023.0 if index == 1 else 300.0,
+                    "moving_pace_s_per_km": 46_663.0 if index == 1 else 296.0,
+                    "best_pace_s_per_km": 9_999.0 if index == 1 else 280.0,
+                    "grade_adjusted_pace_s_per_km": 8_888.0 if index == 1 else 298.0,
+                },
+                {
+                    "interval_type": "INTERVAL_ACTIVE",
+                    "interval_count": 6,
+                    "distance_m": 50.1 if index == 1 else 4_803.0,
+                    "duration_s": 1_441.0,
+                    "moving_duration_s": 1.0 if index == 1 else 1_421.0,
+                },
+                {
+                    "interval_type": "INTERVAL_RECOVERY",
+                    "interval_count": 5,
+                    "distance_m": 800.0,
+                    "duration_s": 600.0,
+                    "moving_duration_s": 580.0,
+                },
+                {
+                    "interval_type": "INTERVAL_COOLDOWN",
+                    "interval_count": 1,
+                    "distance_m": 1_000.0,
+                    "duration_s": 480.0,
+                    "moving_duration_s": 470.0,
+                },
+                {
+                    "interval_type": "RWD_RUN",
+                    "interval_count": 1,
+                    "distance_m": activity.get("distance_m"),
+                    "duration_s": activity.get("duration_s"),
+                },
+                {
+                    "interval_type": "RUN",
+                    "interval_count": 1,
+                    "distance_m": (activity.get("distance_m") or 0) + 30.0,
+                    "duration_s": (activity.get("duration_s") or 0) + 20.0,
+                },
+                {
+                    "interval_type": "RWD_STAND",
+                    "interval_count": 1,
+                    "distance_m": 0.0,
+                    "duration_s": 5.0,
+                },
+            ]
+
+        short_laps = 0
+        for activity in extensions["activities"]:
+            for lap in activity.get("laps", []) or []:
+                if short_laps >= 69:
+                    break
+                lap.update({
+                    "distance_m": 50.0,
+                    "duration_s": 30.0,
+                    "moving_duration_s": 30.0,
+                    "average_pace_s_per_km": 600.0,
+                    "best_pace_s_per_km": 500.0,
+                    "partial_lap": True,
+                })
+                short_laps += 1
+            if short_laps >= 69:
+                break
+        if short_laps != 69:
+            raise AssertionError("No se prepararon las 69 vueltas cortas ficticias")
+
+        # Seis centinelas negativos de Garmin deben contar como ausencias solo
+        # en la vista humana; el modelo de datos original permanece intacto.
+        for offset in (2, 20, 40, 60, 80, 100):
+            days[offset]["average_stress"] = -1
         quality = build_quality_report(
             days,
             extensions["activities"],
             cls.start,
             cls.end,
             legacy_quality={
-                "unit_conversions": ["Conversión ficticia comprobada."],
-                "duplicate_sources_removed": ["Duplicado ficticio eliminado."],
+                "unit_conversions": [
+                    "raw sleep epochs convertidos a fecha local.",
+                    "lactate-threshold speed convertida a m/s.",
+                    "totalAscent y totalDescent interpretados en metros.",
+                ],
+                "duplicate_sources_removed": [
+                    "splits.vueltas, typed_splits.splits y summary/detail unificados.",
+                    "split_summaries duplicados eliminados.",
+                ],
             },
+        )
+        quality["warnings"].append(
+            "endpoint de sueño no disponible entre 2026-05-02/2026-05-04."
+        )
+        quality["transformations"].append(
+            "summaryDTO, lapDTOs y speed_raw se conservaron en la trazabilidad técnica."
         )
         composition = [
             {
@@ -305,10 +465,12 @@ class HumanXlsxReportTests(unittest.TestCase):
     def test_exact_equivalent_counts_and_totals_are_preserved(self):
         workbook = self.open_book(data_only=False)
         try:
-            self.assertEqual(92, len(self.table_values(workbook["ACTIVIDADES"])))
-            self.assertEqual(202, len(self.table_values(workbook["INTERVALOS"])))
-            self.assertEqual(525, len(self.table_values(workbook["VUELTAS"])))
-            self.assertEqual(845, len(self.table_values(workbook["ZONAS"])))
+            self.assertEqual(91, len(self.table_values(workbook["ACTIVIDADES"])))
+            intervals = self.table_values(workbook["INTERVALOS"])
+            self.assertEqual(7, len({row["Actividad"] for row in intervals}))
+            self.assertEqual(28, len(intervals))
+            self.assertEqual(364, len(self.table_values(workbook["VUELTAS"])))
+            self.assertEqual(836, len(self.table_values(workbook["ZONAS"])))
             self.assertEqual(17, len(self.table_values(workbook["SEMANAS"])))
             self.assertEqual(112, len(self.table_values(workbook["SALUD DIARIA"])))
             self.assertEqual(29, len(self.table_values(workbook["EQUIPAMIENTO"])))
@@ -332,7 +494,7 @@ class HumanXlsxReportTests(unittest.TestCase):
             sports = {}
             for row in activity_rows:
                 sports[row["Deporte"]] = sports.get(row["Deporte"], 0) + 1
-            self.assertEqual(60, sports["Carrera"])
+            self.assertEqual(59, sports["Carrera"])
             self.assertEqual(1, sports["Carrera por montaña"])
             self.assertEqual(16, sports["Ciclismo"])
             self.assertEqual(1, sports["Fuerza"])
@@ -346,6 +508,39 @@ class HumanXlsxReportTests(unittest.TestCase):
             self.assertEqual(6, len(self.table_values(workbook["DIARIO"])))
         finally:
             workbook.close()
+
+    def test_excel_preserves_a_case_with_91_original_activities(self):
+        from tests.test_compact_reduction import CompactReductionRegressionTests
+
+        source_case = CompactReductionRegressionTests(methodName="runTest")
+        _, activities = source_case._dataset()
+        extensions = build_report_extensions(
+            activities, [], source_case.START, source_case.END
+        )
+        model = {
+            "export_metadata": {"schema_version": SCHEMA_VERSION},
+            **extensions,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "91_actividades_ficticias.xlsx"
+            render_xlsx(model, output)
+            workbook = load_workbook(output, data_only=False)
+            try:
+                self.assertEqual(
+                    91, len(self.table_values(workbook["ACTIVIDADES"]))
+                )
+            finally:
+                workbook.close()
+
+    def test_rendering_excel_does_not_modify_the_txt_model(self):
+        original = copy.deepcopy(self.model)
+        with tempfile.TemporaryDirectory() as directory:
+            render_xlsx(
+                self.model,
+                Path(directory) / "modelo_sin_cambios.xlsx",
+            )
+        self.assertEqual(original, self.model)
+        self.assertEqual("3.3.1", SCHEMA_VERSION)
 
     def test_visible_structure_is_human_and_technical_sheets_are_hidden(self):
         workbook = self.open_book(data_only=False)
@@ -451,7 +646,7 @@ class HumanXlsxReportTests(unittest.TestCase):
     def test_no_visible_json_formula_or_formula_error(self):
         workbook = self.open_book(data_only=False)
         try:
-            formula_errors = {"#REF!", "#DIV/0!", "#VALUE!", "#N/A"}
+            formula_errors = {"#REF!", "#DIV/0!", "#VALUE!", "#NAME?", "#N/A"}
             for sheet in workbook.worksheets:
                 if sheet.sheet_state != "visible":
                     continue
@@ -496,7 +691,14 @@ class HumanXlsxReportTests(unittest.TestCase):
                 if row["Estado del registro"] == "Registro muy breve"
             ]
             self.assertEqual(2, len(brief))
-            uncategorized_name = self.model["activities"][2]["name"]
+            valid = [
+                row for row in activities
+                if row["Estado del registro"] == "Válido para análisis"
+            ]
+            self.assertEqual(89, len(valid))
+            references = [row["ID de actividad"] for row in activities]
+            self.assertEqual(91, len(set(references)))
+            uncategorized_name = self.model["activities"][18]["name"]
             uncategorized = next(
                 row for row in activities if row["Actividad"] == uncategorized_name
             )
@@ -526,8 +728,30 @@ class HumanXlsxReportTests(unittest.TestCase):
             )
             self.assertEqual(expected_load, indicators["Carga Garmin total"])
             weekly = self.table_values(workbook["SEMANAS"])
-            self.assertEqual(90, sum(row["Sesiones totales"] for row in weekly))
+            self.assertEqual(89, sum(row["Sesiones totales"] for row in weekly))
 
+            session_counts = {}
+            for activity in activities:
+                session_type = activity["Tipo de sesión"]
+                session_counts[session_type] = session_counts.get(session_type, 0) + 1
+            self.assertEqual({
+                "Sin clasificar": 44,
+                "Intervalos": 4,
+                "Tempo": 3,
+                "Rodaje fácil": 6,
+                "Tirada larga": 3,
+                "Competición": 1,
+                "Entrenamiento cruzado": 29,
+                "Fuerza": 1,
+            }, session_counts)
+
+            visible_text = "\n".join(
+                str(cell.value)
+                for sheet in workbook.worksheets
+                if sheet.sheet_state == "visible"
+                for row in sheet.iter_rows()
+                for cell in row if cell.value is not None
+            )
             quality_text = "\n".join(
                 str(cell.value)
                 for row in workbook["CALIDAD DATOS"].iter_rows()
@@ -538,13 +762,213 @@ class HumanXlsxReportTests(unittest.TestCase):
         finally:
             workbook.close()
 
+    def test_intervals_contains_only_the_seven_structured_activities(self):
+        workbook = self.open_book(data_only=False)
+        try:
+            intervals = self.table_values(workbook["INTERVALOS"])
+            activities = {row["Actividad"] for row in intervals}
+            self.assertEqual({
+                "S1 Intervalos - Repeticiones",
+                "S2 Intervalos - Repeticiones",
+                "S3 Intervalos - Repeticiones",
+                "S4 Intervalos - Repeticiones",
+                "S1 Tempo", "S2 Tempo", "S3 Tempo",
+            }, activities)
+            self.assertNotIn("Entrenamiento en cinta", activities)
+            self.assertNotIn("Base", activities)
+            self.assertNotIn("Carrera continua 20", activities)
+
+            by_activity = {}
+            for row in intervals:
+                by_activity.setdefault(row["Actividad"], []).append(row)
+            for activity_rows in by_activity.values():
+                self.assertLessEqual(
+                    sum(
+                        row["Nivel"] == "Total de actividad"
+                        for row in activity_rows
+                    ),
+                    1,
+                )
+                self.assertEqual({
+                    "Calentamiento", "Trabajo activo",
+                    "Recuperación", "Enfriamiento",
+                }, {row["Tipo de intervalo"] for row in activity_rows})
+        finally:
+            workbook.close()
+
+    def test_self_evaluation_coverage_uses_only_valid_activities(self):
+        workbook = self.open_book(data_only=False)
+        try:
+            quality = next(
+                row for row in self.table_values(workbook["CALIDAD DATOS"])
+                if row["Métrica"] == "Autoevaluación de actividades válidas"
+            )
+            self.assertEqual(43, quality["Datos disponibles"])
+            self.assertEqual(89, quality["Datos esperados"])
+            self.assertEqual(46, quality["Datos ausentes"])
+            self.assertAlmostEqual(0.483, quality["Cobertura"], places=3)
+
+            summary = workbook["RESUMEN"]
+            indicators = {
+                summary.cell(row, 1).value: summary.cell(row, 2).value
+                for row in range(1, summary.max_row + 1)
+            }
+            indicators.update({
+                summary.cell(row, 4).value: summary.cell(row, 5).value
+                for row in range(1, summary.max_row + 1)
+            })
+            self.assertAlmostEqual(
+                0.483, indicators["Cobertura de autoevaluación"], places=3
+            )
+        finally:
+            workbook.close()
+
+    def test_session_type_requires_reliable_evidence(self):
+        workbook = self.open_book(data_only=False)
+        try:
+            activities = {
+                row["Actividad"]: row["Tipo de sesión"]
+                for row in self.table_values(workbook["ACTIVIDADES"])
+            }
+            self.assertEqual(
+                "Sin clasificar", activities["Entrenamiento en cinta"]
+            )
+            self.assertEqual("Sin clasificar", activities["Base"])
+            self.assertNotEqual(
+                "Intervalos", activities["Rock and roll 1/2 maratón 2026"]
+            )
+            self.assertEqual(
+                "Competición", activities["Rock and roll 1/2 maratón 2026"]
+            )
+            self.assertEqual(
+                "Intervalos", activities["S1 Intervalos - Repeticiones"]
+            )
+            self.assertEqual("Tempo", activities["S1 Tempo"])
+
+            interval_active = [
+                row for row in self.table_values(workbook["INTERVALOS"])
+                if row["Tipo de intervalo"] == "Trabajo activo"
+            ]
+            self.assertTrue(interval_active)
+            self.assertTrue(all(
+                row["Nivel"] == "Resumen de bloques"
+                for row in interval_active
+            ))
+        finally:
+            workbook.close()
+
+    def test_negative_sentinels_are_missing_before_visible_calculations(self):
+        workbook = self.open_book(data_only=False)
+        try:
+            # Se revisan las hojas de mediciones con dominios no negativos. Un
+            # -100 % comparativo en RESUMEN sí puede ser un cálculo válido.
+            for sheet_name in ("SEMANAS", "SALUD DIARIA", "CALIDAD DATOS"):
+                sheet = workbook[sheet_name]
+                for row in sheet.iter_rows():
+                    for cell in row:
+                        self.assertNotEqual(
+                            -1, cell.value, f"{sheet.title}!{cell.coordinate}"
+                        )
+
+            health = self.table_values(workbook["SALUD DIARIA"])
+            self.assertEqual(
+                6,
+                sum(row["Estrés medio"] is None for row in health),
+            )
+            stress = next(
+                row for row in self.table_values(workbook["CALIDAD DATOS"])
+                if row["Métrica"] == "Estrés medio"
+            )
+            self.assertEqual(106, stress["Datos disponibles"])
+            self.assertEqual(112, stress["Datos esperados"])
+            self.assertEqual(6, stress["Datos ausentes"])
+            self.assertAlmostEqual(0.946, stress["Cobertura"], places=3)
+            self.assertEqual(6, len(stress["Periodos sin datos"].split(", ")))
+        finally:
+            workbook.close()
+
+    def test_quality_uses_friendly_names_and_spanish_date_ranges(self):
+        workbook = self.open_book(data_only=False)
+        try:
+            quality_text = "\n".join(
+                str(cell.value)
+                for row in workbook["CALIDAD DATOS"].iter_rows()
+                for cell in row if cell.value is not None
+            )
+            visible_text = "\n".join(
+                str(cell.value)
+                for sheet in workbook.worksheets
+                if sheet.sheet_state == "visible"
+                for row in sheet.iter_rows()
+                for cell in row if cell.value is not None
+            )
+            for technical in (
+                "raw", "epochs", "endpoint", "lactate-threshold",
+                "splits.vueltas", "typed_splits.splits", "summary",
+                "detail", "split_summaries", "totalAscent", "totalDescent",
+                "summaryDTO", "lapDTOs", "speed_raw",
+            ):
+                self.assertNotIn(technical.casefold(), visible_text.casefold())
+            self.assertNotRegex(quality_text, r"\b\d{4}-\d{2}-\d{2}\b")
+            self.assertNotIn("02/05/2026/04/05/2026", quality_text)
+            self.assertIn("02/05/2026–04/05/2026", quality_text)
+            for explanation in (
+                "Se convirtieron las marcas de tiempo del sueño a fecha y hora local.",
+                "La velocidad del umbral de lactato se convirtió a metros por segundo.",
+                "Se evitó repetir información de vueltas procedente de distintas fuentes de Garmin.",
+                "Se unificaron los resúmenes generales de cada actividad.",
+                "Se eliminaron resúmenes de intervalos duplicados.",
+                "El ascenso y descenso acumulados se interpretaron en metros.",
+            ):
+                self.assertIn(explanation, quality_text)
+        finally:
+            workbook.close()
+
+    def test_table_headers_have_fixed_human_height(self):
+        workbook = self.open_book(data_only=False)
+        try:
+            for name in (
+                "SEMANAS", "ACTIVIDADES", "ZONAS", "SALUD DIARIA",
+                "EQUIPAMIENTO",
+            ):
+                sheet = workbook[name]
+                for table in sheet.tables.values():
+                    from openpyxl.utils.cell import range_boundaries
+                    _, header_row, _, _ = range_boundaries(table.ref)
+                    self.assertGreaterEqual(
+                        sheet.row_dimensions[header_row].height, 30, name
+                    )
+                    self.assertLessEqual(
+                        sheet.row_dimensions[header_row].height, 36, name
+                    )
+                    for cell in sheet[header_row]:
+                        self.assertEqual("center", cell.alignment.vertical)
+                        self.assertTrue(cell.alignment.wrap_text)
+        finally:
+            workbook.close()
+
+    def test_short_laps_keep_rows_but_hide_useless_paces(self):
+        workbook = self.open_book(data_only=False)
+        try:
+            laps = self.table_values(workbook["VUELTAS"])
+            short_laps = [row for row in laps if row["Distancia (m)"] < 100]
+            self.assertEqual(69, len(short_laps))
+            for row in short_laps:
+                self.assertIsNone(row["Ritmo medio (min/km)"])
+                self.assertIsNone(row["Mejor ritmo (min/km)"])
+                self.assertIsNotNone(row["Distancia (m)"])
+                self.assertIsNotNone(row["Duración"])
+                self.assertEqual("Sí", row["Vuelta parcial"])
+        finally:
+            workbook.close()
+
     def test_intervals_journal_dates_and_collapsed_columns(self):
         workbook = self.open_book(data_only=False)
         try:
             intervals = self.table_values(workbook["INTERVALOS"])
             short = next(row for row in intervals if row["Distancia (km)"] == 0.05)
-            self.assertEqual("Intervalo", short["Tipo de intervalo"])
-            self.assertEqual("Intervalo", short["Nivel"])
+            self.assertEqual("Trabajo activo", short["Tipo de intervalo"])
+            self.assertEqual("Resumen de bloques", short["Nivel"])
             for header in (
                 "Ritmo medio (min/km)", "Ritmo en movimiento (min/km)",
                 "Mejor ritmo (min/km)",
@@ -708,7 +1132,7 @@ class HumanXlsxReportTests(unittest.TestCase):
         workbook = self.open_book(data_only=False)
         try:
             activities = self.table_values(workbook["ACTIVIDADES"])
-            self.assertEqual("Sesión ficticia 1", activities[0]["Actividad"])
+            self.assertEqual("Registro breve de carrera", activities[0]["Actividad"])
             gear = self.table_values(workbook["EQUIPAMIENTO"])
             self.assertEqual("Mis Zapatillas Ñandú", gear[0]["Nombre"])
             help_rows = self.table_values(workbook["AYUDA"])

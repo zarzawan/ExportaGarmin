@@ -39,7 +39,7 @@ Necesitas Windows 11, conexión a Internet y una cuenta de Garmin Connect.
 
 1. Abre la página
    [Última versión de ExportaGarmin](https://github.com/zarzawan/ExportaGarmin/releases/latest).
-2. En **Assets**, descarga `ExportaGarmin-3.5.1-Windows-x64.zip`.
+2. En **Assets**, descarga `ExportaGarmin-3.5.2-Windows-x64.zip`.
 3. No descargues **Source code**: esos enlaces son para programadores.
 4. Abre la carpeta **Descargas**.
 5. Pulsa con el botón derecho sobre el ZIP y elige **Extraer todo**.
@@ -68,11 +68,11 @@ La descarga incluye un archivo `.sha256`. Para comprobar su integridad, abre
 PowerShell dentro de Descargas y ejecuta:
 
 ```powershell
-Get-FileHash .\ExportaGarmin-3.5.1-Windows-x64.zip -Algorithm SHA256
+Get-FileHash .\ExportaGarmin-3.5.2-Windows-x64.zip -Algorithm SHA256
 ```
 
 El resultado debe coincidir con el contenido de
-`ExportaGarmin-3.5.1-Windows-x64.zip.sha256`.
+`ExportaGarmin-3.5.2-Windows-x64.zip.sha256`.
 
 </details>
 
@@ -508,7 +508,7 @@ dotnet build GarminDataExport.slnx --no-restore
 Crear localmente la misma descarga portable que publica GitHub:
 
 ```powershell
-.\scripts\Build-PortableRelease.ps1 -Version 3.5.1
+.\scripts\Build-PortableRelease.ps1 -Version 3.5.2
 ```
 
 El resultado queda en `artifacts\` e incluye el ZIP y su SHA-256. GitHub
