@@ -146,8 +146,9 @@ lleva placa de carbono si el dato no está confirmado.
 
 `gear_ref` es una referencia HMAC. Nunca exportar `gearPk`, UUID,
 `userProfilePk`, imágenes, fechas técnicas ni otros identificadores reales.
-En XLSX, `ACTIVIDAD_EQUIPAMIENTO` contiene únicamente `activity_ref` y
-`gear_ref`; la identidad normalizada se consulta en `EQUIPAMIENTO`.
+En XLSX, la vista `ACTIVIDADES` resuelve el nombre, fabricante y modelo desde
+`EQUIPAMIENTO` mediante `gear_ref`. La referencia privada queda oculta al final
+de las tablas relacionadas.
 
 ## XLSX
 
@@ -156,6 +157,9 @@ No contiene macros ni fórmulas. Cualquier texto que comience como fórmula se
 escapa. El lanzador selecciona TXT con JSON de forma predeterminada; XLSX es
 una vista opcional para personas y no el formato principal para una IA.
 
+El modelo semántico del TXT no puede alterarse al cambiar esta presentación.
+La versión de presentación Excel es `1.0.0` y se muestra en `INICIO`.
+
 El libro se genera con `Workbook(write_only=True)` para mantener acotados el
 tiempo y la memoria. La ejecución `xlsx` no debe renderizar también el TXT si
 no se ha solicitado.
@@ -163,36 +167,82 @@ no se ha solicitado.
 Hojas esperadas:
 
 ```text
-LEEME
-CONTEXTO_CARRERA
+INICIO
 RESUMEN
 SEMANAS
-DIAS
 ACTIVIDADES
+INTERVALOS
 VUELTAS
 ZONAS
-ACTIVIDAD_EQUIPAMIENTO
-SERIES_DESCRIPTORES
-SERIES_ACTIVIDAD
+SALUD DIARIA
+HÁBITOS (solo con datos)
+MEDIDAS
 EQUIPAMIENTO
 DIARIO
-PRESION_ARTERIAL
-COMPOSICION
-METRICAS_GARMIN
-CALIDAD_DATOS
-DICCIONARIO
+CALIDAD DATOS
+AYUDA
 ```
 
+Todas las hojas visibles usan español claro, unidades en los encabezados,
+fechas y horas reales, números reales y tablas de Excel con filtros. No deben
+contener JSON, rutas internas ni identificadores visibles. Las ausencias se
+mantienen como celdas vacías. Las hojas vacías no se crean.
+
+La vista humana no clasifica una sesión como intervalos por encontrar
+`INTERVAL_ACTIVE`, `RWD_RUN`, vueltas automáticas o un resumen de intervalos.
+Necesita intención indicada por la persona, metadatos estructurados fiables,
+bloques repetidos de trabajo/recuperación o un título inequívoco. Los valores
+centinela negativos de Garmin se convierten en ausencias antes de calcular las
+métricas visibles y su cobertura, sin alterar el modelo semántico del TXT.
+
+`INTERVALOS` muestra únicamente sesiones clasificadas como intervalos o tempo,
+o actividades con bloques planificados inequívocos. Excluye resúmenes generales
+y pausas automáticas, deduplica con tolerancia a redondeos y presenta
+`INTERVAL_ACTIVE` como trabajo activo cuando resume las repeticiones. Los
+totales ya presentes en `ACTIVIDADES` no se repiten.
+
+La cobertura visible de autoevaluación utiliza la misma población que los KPI:
+actividades válidas después de excluir microactividades. Los mensajes técnicos
+originales de calidad permanecen en las hojas ocultas; `CALIDAD DATOS` solo
+muestra explicaciones comprensibles.
+
+`ACTIVIDADES`, `SEMANAS` y `SALUD DIARIA` muestran inicialmente solo las
+columnas principales. Las columnas avanzadas se conservan en grupos plegados,
+nunca se eliminan. Los códigos Garmin visibles se traducen sin distinguir
+mayúsculas y minúsculas; el texto escrito por la persona se conserva literal.
+
+Una actividad de carrera o ciclismo con duración inferior a 60 segundos y
+distancia inferior a 100 metros se marca como `Registro muy breve`. Permanece
+en `ACTIVIDADES`, pero se excluye de sesiones, días entrenados, cargas,
+comparaciones y gráficos del entrenador. `CALIDAD DATOS` explica el ajuste.
+
+La comparación Excel utiliza solo semanas completas y
+`n = min(4, semanas_completas // 2)`: compara las `n` recientes con las `n`
+anteriores. Este criterio de presentación no modifica el modelo TXT.
+
+`DIARIO` consolida por fecha y referencia de actividad, combina campos no
+vacíos y omite duplicados sin nota ni tipo. Si la fecha del diario difiere de
+la actividad, muestra ambas fechas y un aviso; nunca corrige silenciosamente.
+
+En `INTERVALOS`, ritmos con menos de 100 metros, tiempo en movimiento cero o
+valores inútiles se dejan vacíos. La columna `Nivel` distingue totales de
+actividad, bloques, intervalos y pausas.
+
+La precisión y los campos originales se conservan en hojas ocultas que
+empiezan por `TÉCNICO -`. `TÉCNICO - MAPEO` documenta nombre visible, campo
+original, conversión y unidades. Los identificadores privados necesarios para
+relacionar tablas quedan en columnas ocultas.
+
 Las matrices posicionales de `activity_series.samples` se escriben sin
-eliminar valores `null`. `SERIES_DESCRIPTORES` conserva el índice, la columna,
-el campo de origen, la unidad y el factor. El XLSX admite hasta 25.000 muestras
-de series en total. Si se supera el límite, se omiten todas las muestras solo
-del XLSX para evitar una selección parcial engañosa; `LEEME` y
-`CALIDAD_DATOS` deben registrar el estado y los recuentos. El TXT conserva la
-serie completa.
+eliminar valores `null`. Si existen, sus descriptores se conservan en
+`TÉCNICO - SERIES` y las muestras en `DATOS POR SEGUNDO`, ambas ocultas. El
+XLSX admite hasta 25.000 muestras de series en total. Si se supera el límite,
+se omiten todas las muestras solo del XLSX para evitar una selección parcial
+engañosa; `CALIDAD DATOS` registra el estado y los recuentos. El TXT conserva
+la serie completa.
 
 Una exportación parcial debe indicarse dentro de `Export Metadata`,
-`CALIDAD_DATOS`, el TXT y el manifiesto. El lanzador nunca puede anunciarla
+`CALIDAD DATOS`, el TXT y el manifiesto. El lanzador nunca puede anunciarla
 como completa.
 
 ## Contexto de carrera
@@ -439,7 +489,7 @@ capturar una ventana asociada a un perfil real.
 dotnet restore GarminDataExport.slnx
 dotnet build GarminDataExport.slnx --no-restore
 dotnet run --project GarminDataExport.csproj -- --help
-.\scripts\Build-PortableRelease.ps1 -Version 3.5.1
+.\scripts\Build-PortableRelease.ps1 -Version 3.5.2
 ```
 
 También:
