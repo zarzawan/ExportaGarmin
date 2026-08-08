@@ -128,13 +128,11 @@ timestamped, verified and only then published as the final Release asset.
 The maintainer must confirm separately that MFA is enabled for GitHub and will
 enable MFA for the SignPath account.
 
-## Personal fields still required
+## Submission status
 
-- First name for the individual SignPath account.
-- Last name for the individual SignPath account.
-- Email address for account creation and application notifications.
-- Explicit confirmation that GitHub MFA is enabled.
-- Explicit acceptance of the SignPath Foundation Code of Conduct and the
-  required processing of personal data.
+The application was submitted through the official SignPath Foundation form
+on 8 August 2026 and is pending review. The maintainer confirmed GitHub MFA,
+accepted the required Code of Conduct and consented to the processing needed
+for the application. Optional marketing consent was left unchecked.
 
-The optional marketing-consent checkbox should remain unchecked.
+Personal form values are intentionally not stored in this public repository.

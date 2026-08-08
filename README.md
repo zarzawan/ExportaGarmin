@@ -59,9 +59,10 @@ mantén su contenido junto en la misma carpeta y abre `ExportaGarmin.exe` desde
 esa carpeta.
 
 Es posible que Windows muestre un aviso la primera vez. ExportaGarmin es
-gratuito: no gano ni pretendo ganar dinero con el programa. El proyecto ha
-preparado una solicitud al programa gratuito de firma open source de SignPath
-Foundation, pero la versión actual todavía no está firmada.
+gratuito: no gano ni pretendo ganar dinero con el programa. El proyecto envió
+el 8 de agosto de 2026 una solicitud al programa gratuito de firma open source
+de SignPath Foundation. Está pendiente de revisión y la versión actual todavía
+no está firmada.
 
 Si SignPath acepta el proyecto, las versiones futuras firmadas mostrarán
 **SignPath Foundation** como editor. Consulta la
