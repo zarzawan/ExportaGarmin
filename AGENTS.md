@@ -31,6 +31,10 @@ El esquema compacto actual es `3.3.1`.
 | `Setup-Windows.ps1` | Instalación reproducible en Windows |
 | `scripts/Build-PortableRelease.ps1` | Construcción y validación del ZIP portable |
 | `scripts/Capture-ReadmeScreenshots.ps1` | Capturas reproducibles con datos ficticios |
+| `CODE_SIGNING.md` | Política, roles y alcance de la futura firma |
+| `PRIVACY.md` | Política pública de privacidad |
+| `UNINSTALL.md` | Desinstalación y borrado opcional de datos |
+| `.signpath/artifact-configuration.xml` | Propuesta que limita la firma al lanzador propio |
 | `tests/` | Pruebas sin red con datos anonimizados |
 
 Clases principales del backend:
@@ -428,6 +432,11 @@ runtime/python/
 LEEME_PRIMERO.txt
 LICENSE
 LICENCIAS_TERCEROS.txt
+DOTNET_LICENSE.txt
+DOTNET_THIRD_PARTY_NOTICES.txt
+CODE_SIGNING.md
+PRIVACY.md
+UNINSTALL.md
 CODIGO_FUENTE.txt
 VERSION.txt
 ```
@@ -442,6 +451,24 @@ El registro técnico se muestra siempre y dispone de una zona amplia en la
 ventana principal. No existe un control para ocultarlo. Todos los procesos
 redirigidos deben leer la salida de Python como UTF-8 para conservar
 correctamente el español.
+
+## Firma de código
+
+La solicitud gratuita a SignPath Foundation está pendiente. No afirmar que una
+versión está firmada hasta comprobar su firma Authenticode. La política pública
+está en `CODE_SIGNING.md` y la integración todavía inactiva se documenta en
+`docs/SIGNPATH_INTEGRATION.md`.
+
+Solo se firmará `ExportaGarmin.exe`, creado desde
+`GarminDataExport.Launcher/`. Nunca firmar como propios Python, `.pyd`,
+dependencias, archivos `.pyc` ni binarios upstream. Tras la aprobación, el ZIP
+sin firmar debe pasar por SignPath en GitHub Actions, requerir aprobación
+manual, volver firmado, verificarse y recibir después su SHA-256 final. No debe
+existir una alternativa silenciosa sin firma.
+
+Los identificadores de SignPath son variables de GitHub y el token es un
+secreto. No inventarlos, versionarlos ni mostrarlos. El responsable, revisor y
+aprobador principal es `zarzawan`; MFA es obligatorio en GitHub y SignPath.
 
 `scripts/Build-PortableRelease.ps1` descarga el runtime oficial fijado de
 Python, verifica su SHA-256, instala el lock dentro del paquete, publica .NET

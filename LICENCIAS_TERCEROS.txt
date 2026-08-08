@@ -6,6 +6,9 @@ licencias:
 
 - Python 3.11.9, distribuido por Python Software Foundation.
   Su licencia está incluida en runtime\python\LICENSE.txt.
+- .NET 10 LTS autocontenido, distribuido por .NET Foundation y Microsoft bajo
+  licencia MIT. La descarga incluye DOTNET_LICENSE.txt y
+  DOTNET_THIRD_PARTY_NOTICES.txt.
 - garminconnect y garth, utilizados para comunicarse con Garmin Connect.
 - openpyxl y et_xmlfile, utilizados para crear libros XLSX.
 - requests, requests-oauthlib, oauthlib, urllib3, certifi, idna y
@@ -14,11 +17,15 @@ licencias:
   typing-inspection, utilizados para validar estructuras.
 - tzdata, utilizado para zonas horarias en Windows.
 
-Los metadatos y textos de licencia instalados por cada paquete se conservan
+Los metadatos y archivos de licencia instalados por cada paquete se conservan
 dentro de:
 
 runtime\python\Lib\site-packages\NOMBRE.dist-info\
 
-ExportaGarmin no modifica los términos de esos componentes. El código propio y el
-trabajo derivado del proyecto original se distribuyen bajo Apache License 2.0,
-incluida en el archivo LICENSE de esta carpeta.
+Las dependencias Python fijadas utilizan MIT, BSD-3-Clause, ISC, Apache-2.0,
+MPL-2.0 o PSF-2.0. Son licencias open source y no contienen componentes
+propietarios del mantenedor.
+
+ExportaGarmin no modifica los términos de esos componentes. El código propio y
+el trabajo derivado del proyecto original se distribuyen bajo Apache License
+2.0, incluida en el archivo LICENSE de esta carpeta.

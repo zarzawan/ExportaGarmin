@@ -33,6 +33,19 @@ $pythonArchiveUrl = "https://www.python.org/ftp/python/$pythonVersion/$pythonArc
 $pythonArchiveSha256 =
     '33b448f95fecb7c6f802157dbd5e6b40a2ad9bfc8b95ca634a06ba4073ad1ac0'
 $pythonArchive = Join-Path $cacheRoot $pythonArchiveName
+$dotnetRuntimeVersion = '10.0.10'
+$dotnetNotices = @(
+    @{
+        Name = 'DOTNET_LICENSE.txt'
+        Url = "https://raw.githubusercontent.com/dotnet/runtime/v$dotnetRuntimeVersion/LICENSE.TXT"
+        Sha256 = 'cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310'
+    },
+    @{
+        Name = 'DOTNET_THIRD_PARTY_NOTICES.txt'
+        Url = "https://raw.githubusercontent.com/dotnet/runtime/v$dotnetRuntimeVersion/THIRD-PARTY-NOTICES.TXT"
+        Sha256 = '66f1d4e44973185519bb4aa8a9718eb22fc7af2cc532e3ae9cfc4c127ee7fc54'
+    }
+)
 
 function Remove-SafeDirectory {
     param([Parameter(Mandatory = $true)][string]$Path)
@@ -161,6 +174,29 @@ $launcher = Join-Path $publishRoot 'ExportaGarmin.exe'
 if (-not (Test-Path -LiteralPath $launcher -PathType Leaf)) {
     throw 'La publicación no generó ExportaGarmin.exe.'
 }
+$launcherInfo = (Get-Item -LiteralPath $launcher).VersionInfo
+$expectedMetadata = @{
+    ProductName = 'ExportaGarmin'
+    ProductVersion = $Version
+    FileVersion = "$Version.0"
+    CompanyName = 'zarzawan'
+    FileDescription = 'ExportaGarmin'
+    LegalCopyright =
+        'Copyright © 2026 zarzawan and ExportaGarmin contributors'
+}
+foreach ($attribute in $expectedMetadata.GetEnumerator()) {
+    $actualValue = [string]$launcherInfo.($attribute.Key)
+    if (-not [string]::Equals(
+            $actualValue,
+            [string]$attribute.Value,
+            [StringComparison]::Ordinal)) {
+        throw (
+            "Metadato incoherente en ExportaGarmin.exe: " +
+            "$($attribute.Key)='$actualValue'; " +
+            "se esperaba '$($attribute.Value)'."
+        )
+    }
+}
 Copy-Item -LiteralPath $launcher -Destination (
     Join-Path $packageRoot 'ExportaGarmin.exe')
 
@@ -183,6 +219,36 @@ if (-not [string]::Equals(
         $pythonArchiveSha256,
         [StringComparison]::OrdinalIgnoreCase)) {
     throw 'El SHA-256 del runtime oficial de Python no coincide.'
+}
+
+foreach ($notice in $dotnetNotices) {
+    $cachedNotice = Join-Path (
+        $cacheRoot) "dotnet-$dotnetRuntimeVersion-$($notice.Name)"
+    if (-not (Test-Path -LiteralPath $cachedNotice -PathType Leaf) -or
+        -not [string]::Equals(
+            (Get-FileHash -LiteralPath $cachedNotice -Algorithm SHA256).Hash,
+            $notice.Sha256,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        Remove-Item `
+            -LiteralPath $cachedNotice `
+            -Force `
+            -ErrorAction SilentlyContinue
+        Invoke-WebRequest `
+            -Uri $notice.Url `
+            -OutFile $cachedNotice `
+            -UseBasicParsing
+    }
+    $actualNoticeHash =
+        (Get-FileHash -LiteralPath $cachedNotice -Algorithm SHA256).Hash
+    if (-not [string]::Equals(
+            $actualNoticeHash,
+            $notice.Sha256,
+            [StringComparison]::OrdinalIgnoreCase)) {
+        throw "El SHA-256 de $($notice.Name) no coincide."
+    }
+    Copy-Item `
+        -LiteralPath $cachedNotice `
+        -Destination (Join-Path $packageRoot $notice.Name)
 }
 
 $portablePythonRoot = Join-Path $packageRoot 'runtime\python'
@@ -235,6 +301,9 @@ foreach ($file in @(
         'LEEME_PRIMERO.txt',
         'LICENSE',
         'LICENCIAS_TERCEROS.txt',
+        'CODE_SIGNING.md',
+        'PRIVACY.md',
+        'UNINSTALL.md',
         'requirements-windows-lock.txt')) {
     Copy-Item `
         -LiteralPath (Join-Path $projectRoot $file) `

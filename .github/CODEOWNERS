@@ -1,0 +1,9 @@
+# El propietario revisa las aportaciones y controla el proceso de publicación.
+* @zarzawan
+
+/.github/workflows/ @zarzawan
+/.signpath/ @zarzawan
+/scripts/Build-PortableRelease.ps1 @zarzawan
+/GarminDataExport.Launcher/GarminDataExport.Launcher.csproj @zarzawan
+/CODE_SIGNING.md @zarzawan
+/PRIVACY.md @zarzawan
