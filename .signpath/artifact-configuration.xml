@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters>
+    <parameter name="version" required="true" />
+  </parameters>
+  <zip-file>
+    <directory path="ExportaGarmin-${version}-Windows-x64">
+      <pe-file path="ExportaGarmin.exe"
+               product-name="ExportaGarmin"
+               product-version="${version}"
+               file-version="${version}.0"
+               company-name="zarzawan"
+               copyright="Copyright © 2026 zarzawan and ExportaGarmin contributors">
+        <authenticode-sign hash-algorithm="sha256"
+                           description="ExportaGarmin"
+                           description-url="https://github.com/zarzawan/ExportaGarmin" />
+      </pe-file>
+    </directory>
+  </zip-file>
+</artifact-configuration>

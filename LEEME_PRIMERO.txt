@@ -18,9 +18,12 @@ archivo correcto de la sección Assets.
 AVISO DE WINDOWS
 
 Es posible que Windows muestre un aviso la primera vez. ExportaGarmin es gratuito:
-no gano ni pretendo ganar dinero con el programa. Para reducir este tipo de
-avisos tendría que comprar y renovar un certificado comercial, y ese gasto no
-forma parte del objetivo de este proyecto personal y gratuito.
+no gano ni pretendo ganar dinero con el programa. El proyecto ha preparado una
+solicitud al programa gratuito de firma open source de SignPath Foundation,
+pero la versión actual todavía no está firmada.
+
+Si SignPath acepta el proyecto, las versiones futuras firmadas mostrarán
+"SignPath Foundation" como editor. CODE_SIGNING.md explica el estado exacto.
 
 Si descargaste ExportaGarmin desde la versión oficial, pulsa
 "Más información" y después "Ejecutar de todas formas". No desactives el
@@ -86,7 +89,14 @@ los archivos. Revisa esa configuración si quieres conservarlos solo en el PC.
 Si aparece "exportación parcial", consulta "Detalles técnicos" y repite más
 tarde si los datos que faltan son importantes.
 
-La guía completa está en README.md.
+DESINSTALAR
+
+Para quitar solo el programa, ciérralo y elimina la carpeta extraída. Para
+borrar también perfiles, sesiones, caché, diario y exportaciones, sigue
+UNINSTALL.md. Revisa antes los archivos y cualquier copia sincronizada por
+OneDrive.
+
+La guía completa está en README.md. La privacidad se detalla en PRIVACY.md.
 
 ExportaGarmin es gratuito y no oficial. No pertenece a Garmin, no está afiliado a
 Garmin ni cuenta con su respaldo. Está basado en

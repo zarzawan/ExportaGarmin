@@ -31,6 +31,13 @@ Esta edición parte de
 [sirredbeard/garmin-data-export](https://github.com/sirredbeard/garmin-data-export),
 mantiene la capa .NET y conserva la licencia Apache 2.0.
 
+Transparencia del proyecto:
+
+- [Política de privacidad](PRIVACY.md)
+- [Code signing policy](CODE_SIGNING.md) — solicitud a SignPath pendiente
+- [Desinstalación y borrado de datos](UNINSTALL.md)
+- [Licencias de terceros](LICENCIAS_TERCEROS.txt)
+
 ## Lo más sencillo: instalar y usar
 
 Necesitas Windows 11, conexión a Internet y una cuenta de Garmin Connect.
@@ -52,9 +59,14 @@ mantén su contenido junto en la misma carpeta y abre `ExportaGarmin.exe` desde
 esa carpeta.
 
 Es posible que Windows muestre un aviso la primera vez. ExportaGarmin es
-gratuito: no gano ni pretendo ganar dinero con el programa. Para reducir este
-tipo de avisos tendría que comprar y renovar un certificado comercial, y ese
-gasto no forma parte del objetivo de este proyecto personal y gratuito.
+gratuito: no gano ni pretendo ganar dinero con el programa. El proyecto ha
+preparado una solicitud al programa gratuito de firma open source de SignPath
+Foundation, pero la versión actual todavía no está firmada.
+
+Si SignPath acepta el proyecto, las versiones futuras firmadas mostrarán
+**SignPath Foundation** como editor. Consulta la
+[Code signing policy](CODE_SIGNING.md) para comprobar el estado y el alcance
+exactos; nunca se afirmará que una versión está firmada antes de verificarla.
 
 Si lo descargaste desde la
 [versión oficial](https://github.com/zarzawan/ExportaGarmin/releases/latest),
@@ -349,6 +361,8 @@ modelo y no muestra objetos JSON en sus hojas visibles.
 
 ## Privacidad
 
+La explicación completa está en la [política de privacidad](PRIVACY.md).
+
 ExportaGarmin aplica automáticamente una única privacidad recomendada. No hay
 que elegir ni configurar nada: retira identidad, contacto, direcciones e
 identificadores personales, pero conserva títulos, coordenadas exactas,
@@ -427,6 +441,17 @@ borra.
 
 `Instalar.bat` se conserva únicamente para desarrolladores que trabajen con
 el código fuente. Los usuarios de la versión descargable no deben ejecutarlo.
+
+## Desinstalar y borrar datos
+
+ExportaGarmin es portable. Para quitar solo el programa, ciérralo y elimina la
+carpeta que extrajiste del ZIP. Los perfiles y resultados se conservan para que
+puedas actualizar sin perderlos.
+
+Si también quieres cerrar sesiones y borrar perfiles, cachés, diario y
+exportaciones, sigue la guía completa de
+[desinstalación y borrado de datos](UNINSTALL.md). Revisa siempre el contenido
+antes de eliminarlo, especialmente si Documentos se sincroniza con OneDrive.
 
 ## Problemas frecuentes
 
@@ -532,6 +557,16 @@ Licencia Apache 2.0. Consulta [LICENSE](LICENSE).
 
 Proyecto original:
 [sirredbeard/garmin-data-export](https://github.com/sirredbeard/garmin-data-export).
+
+ExportaGarmin conserva el historial Git común con el proyecto original y no
+oculta esta procedencia, aunque GitHub no muestre actualmente el repositorio
+como un fork formal. El backend Python y la consola .NET comenzaron en el
+proyecto original; el lanzador gráfico, los perfiles, los informes para IA, el
+diario, la privacidad automática, el Excel y el paquete portable se mantienen
+en este repositorio.
+
+El proyecto es gratuito y no tiene publicidad, suscripciones, afiliados,
+telemetría ni finalidad comercial.
 
 Esta edición se distribuye sin garantía. Revisa siempre los datos y protege tus
 archivos de salud.
