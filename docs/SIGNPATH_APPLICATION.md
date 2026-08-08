@@ -48,7 +48,7 @@ uploads.
 
 ExportaGarmin is a recently established project, first published on 28 July
 2026. It has ten public Windows releases, a protected main branch, automated
-tests and release builds, 200 regression tests, two GitHub stars and 21 asset
+tests and release builds, 205 regression tests, two GitHub stars and 21 asset
 downloads as of 8 August 2026. It is actively maintained, but it does not yet
 have independent media coverage or a large user community. Its upstream base,
 sirredbeard/garmin-data-export, was publicly released in March 2026.
