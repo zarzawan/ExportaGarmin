@@ -2,14 +2,15 @@
 
 ## Estado / Status
 
-ExportaGarmin está preparando su solicitud para participar en el programa
-gratuito para proyectos open source de SignPath Foundation. La versión pública
-actual todavía no está firmada. Esta página no afirma que exista una solicitud
-enviada ni que SignPath la haya aceptado.
+ExportaGarmin envió el 8 de agosto de 2026 su solicitud para participar en el
+programa gratuito para proyectos open source de SignPath Foundation. La
+solicitud está pendiente de revisión y la versión pública actual todavía no
+está firmada. Esta página no afirma que SignPath haya aceptado el proyecto.
 
-ExportaGarmin is preparing its application for the free SignPath Foundation
-open-source program. The current public release is not signed yet. This page
-does not claim that an application has been submitted or accepted.
+ExportaGarmin submitted its application for the free SignPath Foundation
+open-source program on 8 August 2026. The application is pending review and
+the current public release is not signed yet. This page does not claim that
+SignPath has accepted the project.
 
 Cuando el proyecto sea aceptado, se aplicará esta declaración exigida por
 SignPath:
