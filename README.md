@@ -291,49 +291,61 @@ NotebookLM u otra IA.
 
 ### Excel `.xlsx` — opcional
 
-Está pensado principalmente para quien quiera abrir los datos como tablas.
-También puede utilizarse con una IA, pero tarda más en generarse y no aporta
-una ventaja general frente al TXT con JSON.
+Está pensado para corredores y entrenadores que quieran revisar los datos de
+forma visual, sin conocer JSON ni los nombres técnicos de Garmin. Las fechas,
+duraciones, ritmos, distancias y porcentajes son valores reales de Excel; se
+pueden ordenar y filtrar sin convertir texto manualmente.
 
-Contiene tablas estáticas fáciles de revisar:
+Las pestañas principales aparecen en español y en este orden:
 
 ```text
-LEEME
-CONTEXTO_CARRERA
+INICIO
 RESUMEN
 SEMANAS
-DIAS
 ACTIVIDADES
+INTERVALOS
 VUELTAS
 ZONAS
-ACTIVIDAD_EQUIPAMIENTO
-SERIES_DESCRIPTORES
-SERIES_ACTIVIDAD
+SALUD DIARIA
+HÁBITOS (solo cuando hay registros)
+MEDIDAS
 EQUIPAMIENTO
 DIARIO
-PRESION_ARTERIAL
-COMPOSICION
-METRICAS_GARMIN
-CALIDAD_DATOS
-DICCIONARIO
+CALIDAD DATOS
+AYUDA
 ```
 
-No utiliza macros. Los valores que podrían interpretarse como fórmulas se
-escapan antes de escribirlos.
+`INICIO` resume el periodo y el objetivo de carrera. `RESUMEN` muestra los
+indicadores principales, una comparación entre bloques de semanas y hasta tres
+gráficos. Las demás pestañas utilizan tablas reales de Excel con filtros,
+unidades en los encabezados y nombres comprensibles.
 
-`SERIES_ACTIVIDAD` conserva las muestras detalladas cuando se activa esa
-opción para una actividad. `SERIES_DESCRIPTORES` explica el significado y la
-unidad de cada columna. El libro se escribe de forma progresiva para reducir
-el tiempo y la memoria utilizados. Si el intervalo contiene más de 25.000
-muestras, las series se omiten únicamente del Excel y queda una advertencia
-en `LEEME` y `CALIDAD_DATOS`; el TXT conserva todas las muestras. Para verlas
-en Excel, utiliza un intervalo más corto o analiza una actividad por separado.
+Las hojas más anchas muestran al abrir solo las columnas más útiles. Los datos
+avanzados siguen dentro del mismo archivo y se pueden desplegar con el símbolo
+`+` de Excel. Los registros de carrera o ciclismo de menos de un minuto y menos
+de 100 metros se conservan como `Registro muy breve`, pero no cuentan como una
+sesión ni alteran las cargas, comparaciones o gráficos del entrenador.
+
+El diario reúne las anotaciones de una misma fecha y actividad en una sola
+fila. Si la fecha anotada no coincide con la fecha de Garmin, el Excel muestra
+un aviso y conserva ambas fechas para que la persona pueda revisarlas.
+
+No utiliza macros ni fórmulas. Los cálculos proceden del modelo semántico ya
+validado y cualquier texto que pudiera interpretarse como fórmula se escapa
+antes de escribirlo. Los campos originales y el mapeo de conversiones se
+conservan en pestañas ocultas cuyo nombre empieza por `TÉCNICO -`; no estorban
+en el uso normal, pero permiten auditar el informe.
+
+Si se solicitan series temporales, aparecen en `DATOS POR SEGUNDO`, oculta por
+defecto. Si el intervalo contiene más de 25.000 muestras, se omiten únicamente
+del Excel y queda una advertencia en `CALIDAD DATOS`; el TXT conserva todas las
+muestras. Para verlas en Excel, utiliza un intervalo más corto o analiza una
+actividad por separado.
 
 También se pueden crear ambos formatos, aunque esa opción tarda más. El TXT
-conserva además una copia filtrada de la fuente deportiva de cada actividad.
-Excel mantiene los campos deportivos normalizados, las vueltas y las series
-admitidas, porque una celda de Excel no puede contener una respuesta JSON
-grande sin recortarla.
+continúa siendo el formato recomendado para una IA y conserva exactamente el
+modelo semántico aprobado. El Excel es una presentación humana del mismo
+modelo y no muestra objetos JSON en sus hojas visibles.
 
 ## Privacidad
 
