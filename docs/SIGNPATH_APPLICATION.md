@@ -1,4 +1,4 @@
-# SignPath Foundation application draft
+# SignPath Foundation application record
 
 This document contains the non-personal answers prepared for the official
 application form. It deliberately omits the maintainer's legal first name,
@@ -131,8 +131,17 @@ enable MFA for the SignPath account.
 ## Submission status
 
 The application was submitted through the official SignPath Foundation form
-on 8 August 2026 and is pending review. The maintainer confirmed GitHub MFA,
-accepted the required Code of Conduct and consented to the processing needed
-for the application. Optional marketing consent was left unchecked.
+on 8 August 2026. On 13 August 2026, SignPath said it could not approve the
+application at that time because the project did not yet have sufficient
+public trust and visibility signals. The response cited community adoption,
+independent references, sustained activity and engagement as the relevant
+signals, and invited the project to reapply after gaining broader recognition.
+
+This outcome was about current public visibility, not a reported technical,
+licensing, privacy or security defect in ExportaGarmin.
+
+The maintainer confirmed GitHub MFA, accepted the required Code of Conduct and
+consented to the processing needed for the application. Optional marketing
+consent was left unchecked.
 
 Personal form values are intentionally not stored in this public repository.

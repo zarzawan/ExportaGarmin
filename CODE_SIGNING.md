@@ -3,16 +3,21 @@
 ## Estado / Status
 
 ExportaGarmin envió el 8 de agosto de 2026 su solicitud para participar en el
-programa gratuito para proyectos open source de SignPath Foundation. La
-solicitud está pendiente de revisión y la versión pública actual todavía no
-está firmada. Esta página no afirma que SignPath haya aceptado el proyecto.
+programa gratuito para proyectos open source de SignPath Foundation. El 13 de
+agosto de 2026, SignPath comunicó que no podía aprobarla en ese momento porque
+el proyecto aún no mostraba suficiente adopción, visibilidad y referencias
+públicas independientes. Indicó que se podrá presentar otra solicitud cuando
+alcance un reconocimiento más amplio. La versión pública actual no está
+firmada.
 
 ExportaGarmin submitted its application for the free SignPath Foundation
-open-source program on 8 August 2026. The application is pending review and
-the current public release is not signed yet. This page does not claim that
-SignPath has accepted the project.
+open-source program on 8 August 2026. On 13 August 2026, SignPath said it could
+not approve the application at that time because the project did not yet show
+enough public adoption, visibility and independent references. SignPath
+invited the project to reapply after gaining broader recognition. The current
+public release is not signed.
 
-Cuando el proyecto sea aceptado, se aplicará esta declaración exigida por
+Si una futura solicitud es aceptada, se aplicará esta declaración exigida por
 SignPath:
 
 > Free code signing provided by

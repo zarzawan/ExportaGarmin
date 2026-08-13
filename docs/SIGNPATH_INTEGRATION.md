@@ -1,9 +1,10 @@
 # Integración prevista con SignPath
 
-Esta integración está **preparada pero no activada**. ExportaGarmin todavía no
-ha sido aceptado por SignPath Foundation y no existen identificadores ni
-secretos válidos. El workflow actual continúa publicando versiones sin firma
-hasta que la solicitud sea aprobada.
+Esta integración está **preparada pero no activada**. SignPath Foundation no
+aprobó la primera solicitud por falta de adopción y visibilidad pública
+suficientes. No existen identificadores ni secretos válidos. El workflow
+actual continúa publicando versiones sin firma. Solo se activará si una futura
+solicitud es aceptada.
 
 ## Alcance
 
@@ -122,5 +123,5 @@ Un fallo, rechazo o tiempo de espera abortará la Release.
 - Verificar `Status = Valid`, editor `SignPath Foundation` y sello de tiempo.
 - Ejecutar `ExportaGarmin.exe --diagnose` después de la firma.
 - Volver a ejecutar las 200 pruebas y la comprobación portable.
-- Actualizar el README y las notas de la Release de “solicitud pendiente” a
+- Actualizar el README y las notas de la Release de “solicitud no aprobada” a
   “firma activa”.
