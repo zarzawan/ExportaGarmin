@@ -454,7 +454,9 @@ correctamente el español.
 
 ## Firma de código
 
-La solicitud gratuita a SignPath Foundation está pendiente. No afirmar que una
+La primera solicitud gratuita a SignPath Foundation no fue aprobada por falta
+de adopción y visibilidad pública suficientes. Puede volver a presentarse
+cuando el proyecto consiga un reconocimiento más amplio. No afirmar que una
 versión está firmada hasta comprobar su firma Authenticode. La política pública
 está en `CODE_SIGNING.md` y la integración todavía inactiva se documenta en
 `docs/SIGNPATH_INTEGRATION.md`.

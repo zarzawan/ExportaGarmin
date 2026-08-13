@@ -34,7 +34,7 @@ mantiene la capa .NET y conserva la licencia Apache 2.0.
 Transparencia del proyecto:
 
 - [Política de privacidad](PRIVACY.md)
-- [Code signing policy](CODE_SIGNING.md) — solicitud a SignPath pendiente
+- [Code signing policy](CODE_SIGNING.md) — solicitud no aprobada por ahora
 - [Desinstalación y borrado de datos](UNINSTALL.md)
 - [Licencias de terceros](LICENCIAS_TERCEROS.txt)
 
@@ -59,12 +59,13 @@ mantén su contenido junto en la misma carpeta y abre `ExportaGarmin.exe` desde
 esa carpeta.
 
 Es posible que Windows muestre un aviso la primera vez. ExportaGarmin es
-gratuito: no gano ni pretendo ganar dinero con el programa. El proyecto envió
-el 8 de agosto de 2026 una solicitud al programa gratuito de firma open source
-de SignPath Foundation. Está pendiente de revisión y la versión actual todavía
-no está firmada.
+gratuito: no gano ni pretendo ganar dinero con el programa. SignPath Foundation
+no aprobó por ahora la solicitud gratuita porque el proyecto todavía no tiene
+suficiente adopción y visibilidad pública. Permitirá volver a solicitarla
+cuando el proyecto consiga un reconocimiento más amplio. La versión actual no
+está firmada.
 
-Si SignPath acepta el proyecto, las versiones futuras firmadas mostrarán
+Si SignPath acepta una futura solicitud, las versiones firmadas mostrarán
 **SignPath Foundation** como editor. Consulta la
 [Code signing policy](CODE_SIGNING.md) para comprobar el estado y el alcance
 exactos; nunca se afirmará que una versión está firmada antes de verificarla.
