@@ -265,10 +265,20 @@ actividad se conservan siempre.
 contener objetivo, RPE, dolor, fatiga, motivación, estrés, nutrición y
 tolerancia digestiva.
 
-Los comentarios libres quedan fuera por defecto. Cada entrada puede dar
-consentimiento mediante `includeCommentInExport`. La opción global
+Los comentarios libres de Garmin quedan fuera por defecto. En el diario local,
+la interfaz avisa de forma visible que guardar un comentario implica incluirlo
+en el informe y establece automáticamente `includeCommentInExport = true`.
+Las entradas antiguas con el valor `false` no se migran silenciosamente; al
+editarlas y guardarlas se aplica el comportamiento nuevo. La opción global
 `--include-free-text` sigue siendo un consentimiento técnico más amplio y no
 la utiliza el lanzador.
+
+El lanzador muestra las actividades mediante fecha, título, distancia y
+duración, pero conserva `activity_ref` como única relación canónica. El campo
+local `activityDisplayName` solo recuerda esa descripción para la interfaz y
+no sustituye ni expone el identificador real de Garmin. El diario ofrece un
+selector de anotaciones por fecha, actividad y comentario para facilitar su
+edición.
 
 ## Series temporales
 
@@ -518,7 +528,7 @@ capturar una ventana asociada a un perfil real.
 dotnet restore GarminDataExport.slnx
 dotnet build GarminDataExport.slnx --no-restore
 dotnet run --project GarminDataExport.csproj -- --help
-.\scripts\Build-PortableRelease.ps1 -Version 3.5.2
+.\scripts\Build-PortableRelease.ps1 -Version 3.6.0
 ```
 
 También:

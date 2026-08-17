@@ -12,7 +12,7 @@ ABRIR
 No necesitas instalar nada más.
 
 Si descargaste el código fuente en vez de
-ExportaGarmin-3.5.2-Windows-x64.zip, vuelve a GitHub Releases y descarga el
+ExportaGarmin-3.6.0-Windows-x64.zip, vuelve a GitHub Releases y descarga el
 archivo correcto de la sección Assets.
 
 AVISO DE WINDOWS
@@ -61,7 +61,10 @@ OTRAS OPCIONES
 
 - "Analizar una actividad" añade el máximo detalle disponible de una sesión.
 - "Archivo histórico" permite elegir las fechas inicial y final.
-- "Mi diario" añade sensaciones o nutrición que el reloj no conoce.
+- "Mi diario" permite escribir y editar sensaciones o contexto que el reloj no
+  conoce. Puedes reconocer la actividad por su nombre, distancia y duración,
+  y elegir directamente qué anotación quieres editar. Los comentarios nuevos
+  se incluyen automáticamente en el informe.
 - "Guía sencilla" explica la rutina diaria, semanal, mensual y la privacidad.
 - Excel es opcional para revisar tablas. El TXT es más rápido y conserva todas
   las series detalladas cuando el intervalo es grande.

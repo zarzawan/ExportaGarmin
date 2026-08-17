@@ -46,7 +46,7 @@ Necesitas Windows 11, conexión a Internet y una cuenta de Garmin Connect.
 
 1. Abre la página
    [Última versión de ExportaGarmin](https://github.com/zarzawan/ExportaGarmin/releases/latest).
-2. En **Assets**, descarga `ExportaGarmin-3.5.2-Windows-x64.zip`.
+2. En **Assets**, descarga `ExportaGarmin-3.6.0-Windows-x64.zip`.
 3. No descargues **Source code**: esos enlaces son para programadores.
 4. Abre la carpeta **Descargas**.
 5. Pulsa con el botón derecho sobre el ZIP y elige **Extraer todo**.
@@ -82,11 +82,11 @@ La descarga incluye un archivo `.sha256`. Para comprobar su integridad, abre
 PowerShell dentro de Descargas y ejecuta:
 
 ```powershell
-Get-FileHash .\ExportaGarmin-3.5.2-Windows-x64.zip -Algorithm SHA256
+Get-FileHash .\ExportaGarmin-3.6.0-Windows-x64.zip -Algorithm SHA256
 ```
 
 El resultado debe coincidir con el contenido de
-`ExportaGarmin-3.5.2-Windows-x64.zip.sha256`.
+`ExportaGarmin-3.6.0-Windows-x64.zip.sha256`.
 
 </details>
 
@@ -249,19 +249,31 @@ en el archivo para que la IA interprete correctamente el entrenamiento.
 
 ## Mi diario
 
-El diario sirve para añadir únicamente lo que el reloj no conoce:
+El diario sirve para escribir lo que el reloj no conoce. El comentario ocupa
+la parte principal de la ventana y puede incluir sensaciones, contexto del día,
+clima, descanso, molestias o cualquier detalle útil para interpretar la sesión.
 
+![Diario de entrenamiento con actividades y comentarios ficticios](docs/images/exportagarmin-diario.png)
+
+Al guardar un comentario, se incluye automáticamente en los próximos informes
+para la IA. Ya no existe una casilla que haya que recordar marcar. Los
+comentarios antiguos que se guardaron expresamente como privados conservan esa
+decisión; para incluir uno, ábrelo, revísalo y pulsa **Guardar cambios**.
+
+La pantalla muestra primero solo las opciones más utilizadas:
+
+- actividad, con su nombre, distancia y duración para reconocerla fácilmente;
 - objetivo de una sesión;
 - esfuerzo percibido;
-- fatiga, motivación y estrés vital;
-- dolor y zona;
-- carbohidratos, líquido y sodio por hora;
-- tolerancia digestiva;
-- comentario opcional.
+- dolor.
 
-El comentario permanece local por defecto. Solo entra en la exportación si
-marcas expresamente **Incluir comentario en el archivo para la IA**. Las
-entradas se pueden eliminar desde el propio diario.
+**Más datos opcionales** permite añadir fatiga, motivación, estrés vital, zona
+del dolor, nutrición y tolerancia digestiva sin recargar la vista principal.
+Las anotaciones guardadas muestran el comentario con varias líneas. Para
+editar una, elígela en el desplegable **Editar** y pulsa **Abrir anotación**.
+También puedes hacer doble clic sobre su fila. El selector utiliza la fecha,
+el nombre de la actividad y un resumen del comentario para que sea fácil
+distinguirlas.
 
 La autoevaluación de Garmin sigue siendo la fuente recomendada para esfuerzo y
 sensaciones de cada actividad. El diario la complementa, no la sustituye.
@@ -272,7 +284,8 @@ sensaciones de cada actividad. El diario la complementa, no la sustituye.
 
 - Sincroniza el reloj con Garmin Connect.
 - Después de una sesión importante, completa la autoevaluación de Garmin.
-- Usa el diario solo si quieres añadir contexto que el reloj no conoce.
+- Usa el diario si quieres añadir contexto que el reloj no conoce. Cualquier
+  comentario nuevo se incorporará al informe para la IA.
 
 No hace falta crear un archivo todos los días.
 
@@ -535,7 +548,7 @@ dotnet build GarminDataExport.slnx --no-restore
 Crear localmente la misma descarga portable que publica GitHub:
 
 ```powershell
-.\scripts\Build-PortableRelease.ps1 -Version 3.5.2
+.\scripts\Build-PortableRelease.ps1 -Version 3.6.0
 ```
 
 El resultado queda en `artifacts\` e incluye el ZIP y su SHA-256. GitHub

@@ -31,7 +31,7 @@ internal sealed class HelpForm : Form
             """
             Sincroniza el reloj con Garmin Connect.
 
-            Después de una sesión importante, completa la autoevaluación de Garmin. Si quieres aportar información que el reloj no conoce, abre «Mi diario»: objetivo de la sesión, dolor, esfuerzo, nutrición o sensaciones.
+            Después de una sesión importante, completa la autoevaluación de Garmin. Si quieres aportar información que el reloj no conoce, abre «Mi diario» y escribe un comentario. Se incluirá automáticamente en el informe para la IA. La actividad aparece con su nombre, distancia y duración. Para editar, elige una anotación guardada y pulsa «Abrir anotación»; también puedes hacer doble clic en la tabla.
 
             No hace falta exportar todos los días. El diario es opcional y conviene reservarlo para entrenamientos importantes.
             """));
