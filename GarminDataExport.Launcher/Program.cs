@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using GarminDataExport.Launcher.Services;
+using GarminDataExport.Launcher.Views;
 
 namespace GarminDataExport.Launcher;
 
@@ -19,9 +20,12 @@ internal static class Program
             var mode = previewIndex + 1 < args.Length
                 ? args[previewIndex + 1]
                 : "principal";
-            if (mode is not ("principal" or "informe"))
+            if (mode is not ("principal" or "informe" or "diario"))
                 return 4;
-            Application.Run(new MainForm(mode));
+            Application.Run(
+                mode == "diario"
+                    ? JournalForm.CreateReadmePreview()
+                    : new MainForm(mode));
             return 0;
         }
 

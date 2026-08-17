@@ -11,16 +11,29 @@ internal sealed class RecentActivity
 
     public override string ToString()
     {
+        var summary = ToShortString();
+        return string.IsNullOrWhiteSpace(Date)
+            ? summary
+            : string.IsNullOrWhiteSpace(summary)
+                ? Date
+                : $"{Date} · {summary}";
+    }
+
+    public string ToShortString()
+    {
         var distance = DistanceMeters is > 0
             ? $"{DistanceMeters.Value / 1000d:0.0} km"
             : "";
         var duration = DurationSeconds is > 0
             ? FormatDuration(DurationSeconds.Value)
             : "";
-        var parts = new[] { Date, Sport, distance, duration, Label }
+        var activityName = string.IsNullOrWhiteSpace(Label)
+            ? Sport
+            : Label;
+        var parts = new[] { activityName, distance, duration }
             .Where(value => !string.IsNullOrWhiteSpace(value));
         var visible = string.Join(" · ", parts);
-        return string.IsNullOrWhiteSpace(visible) ? $"Actividad {Id}" : visible;
+        return string.IsNullOrWhiteSpace(visible) ? "Actividad reciente" : visible;
     }
 
     private static string FormatDuration(double seconds)

@@ -11,6 +11,7 @@ internal sealed class JournalEntry
     public string EntryId { get; set; } = Guid.NewGuid().ToString("N");
     public DateTime Date { get; set; } = DateTime.Today;
     public string ActivityId { get; set; } = "";
+    public string ActivityDisplayName { get; set; } = "";
     public string IntendedPurpose { get; set; } = "";
     public int? PainScore0To10 { get; set; }
     public string PainLocation { get; set; } = "";

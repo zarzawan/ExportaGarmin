@@ -976,9 +976,31 @@ internal sealed class MainForm : Form
     {
         if (_activeProfile is null)
             return;
-        using var form = new JournalForm(_activeProfile, activityId);
+        using var form = new JournalForm(
+            _activeProfile,
+            activityId,
+            ReadRecentActivitiesForJournal(_activeProfile));
         ShowStorageRecoveryNotices();
         form.ShowDialog(this);
+    }
+
+    private static IReadOnlyList<RecentActivity> ReadRecentActivitiesForJournal(
+        UserProfile profile)
+    {
+        try
+        {
+            var path = AppPaths.ActivityListFile(profile);
+            return File.Exists(path)
+                ? RecentActivityReader.Read(path)
+                : [];
+        }
+        catch (Exception exception) when (
+            exception is IOException or
+            UnauthorizedAccessException or
+            JsonException)
+        {
+            return [];
+        }
     }
 
     private async Task ChooseActivityAsync()

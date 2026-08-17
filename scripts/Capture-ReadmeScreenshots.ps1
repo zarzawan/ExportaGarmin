@@ -127,7 +127,11 @@ Save-Preview `
 Save-Preview `
     -Mode 'informe' `
     -FileName 'exportagarmin-informe.png'
+Save-Preview `
+    -Mode 'diario' `
+    -FileName 'exportagarmin-diario.png'
 
 Write-Host 'Capturas anónimas creadas:' -ForegroundColor Green
 Write-Host (Join-Path $outputRoot 'exportagarmin-principal.png')
 Write-Host (Join-Path $outputRoot 'exportagarmin-informe.png')
+Write-Host (Join-Path $outputRoot 'exportagarmin-diario.png')
