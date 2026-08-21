@@ -12,7 +12,7 @@ ABRIR
 No necesitas instalar nada más.
 
 Si descargaste el código fuente en vez de
-ExportaGarmin-3.6.0-Windows-x64.zip, vuelve a GitHub Releases y descarga el
+ExportaGarmin-3.7.0-Windows-x64.zip, vuelve a GitHub Releases y descarga el
 archivo correcto de la sección Assets.
 
 AVISO DE WINDOWS
@@ -57,14 +57,26 @@ ocultarlo si no lo necesitas. No compartas ese registro sin revisarlo.
 El programa propone 16 semanas para maratón y 12 para media maratón. Al repetir
 la revisión sustituye el archivo anterior para no acumular cientos de copias.
 
+ACTUALIZACIONES
+
+ExportaGarmin comprueba una vez al día si hay una versión nueva. También puedes
+pulsar "Comprobar versión". Si aparece un aviso, descarga el nuevo ZIP,
+extráelo en otra carpeta y abre el nuevo ExportaGarmin.exe.
+
+Tus perfiles, sesión de Garmin, anotaciones, caché e informes se conservan
+porque se guardan fuera de la carpeta del programa. La actualización no se
+descarga ni se instala sola.
+
 OTRAS OPCIONES
 
 - "Analizar una actividad" añade el máximo detalle disponible de una sesión.
 - "Archivo histórico" permite elegir las fechas inicial y final.
 - "Mi diario" permite escribir y editar sensaciones o contexto que el reloj no
-  conoce. Puedes reconocer la actividad por su nombre, distancia y duración,
+  conoce. Puedes reconocer la actividad por el día de la semana, fecha,
+  nombre, distancia y duración,
   y elegir directamente qué anotación quieres editar. Los comentarios nuevos
-  se incluyen automáticamente en el informe.
+  se incluyen automáticamente en el informe. Si falta la última sesión, pulsa
+  "Actualizar actividades" para traer de Garmin los últimos 90 días hasta hoy.
 - "Guía sencilla" explica la rutina diaria, semanal, mensual y la privacidad.
 - Excel es opcional para revisar tablas. El TXT es más rápido y conserva todas
   las series detalladas cuando el intervalo es grande.

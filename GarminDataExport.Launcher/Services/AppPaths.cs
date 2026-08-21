@@ -22,6 +22,7 @@ internal static class AppPaths
             "GarminDataExportLauncher");
 
     public static string SettingsFile => Path.Combine(LocalRoot, "settings.json");
+    public static string UpdateCheckFile => Path.Combine(LocalRoot, "actualizaciones.json");
     public static string ProfilesFile => Path.Combine(LocalRoot, "profiles.json");
     public static string ProfilesRoot => Path.Combine(LocalRoot, "profiles");
 

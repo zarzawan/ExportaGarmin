@@ -28,6 +28,7 @@ El esquema compacto actual es `3.3.1`.
 | `training_analysis.py` | Modelo semántico, métricas, privacidad y XLSX |
 | `GarminDataExport.csproj` | Capa .NET de consola que conserva el diseño original |
 | `GarminDataExport.Launcher/` | Asistente gráfico WinForms en español |
+| `GarminDataExport.Launcher/Services/UpdateChecker.cs` | Consulta y compara la última Release pública |
 | `Setup-Windows.ps1` | Instalación reproducible en Windows |
 | `scripts/Build-PortableRelease.ps1` | Construcción y validación del ZIP portable |
 | `scripts/Capture-ReadmeScreenshots.ps1` | Capturas reproducibles con datos ficticios |
@@ -273,12 +274,20 @@ editarlas y guardarlas se aplica el comportamiento nuevo. La opción global
 `--include-free-text` sigue siendo un consentimiento técnico más amplio y no
 la utiliza el lanzador.
 
-El lanzador muestra las actividades mediante fecha, título, distancia y
-duración, pero conserva `activity_ref` como única relación canónica. El campo
+El lanzador muestra las actividades mediante día de la semana, fecha, título,
+distancia y duración, pero conserva `activity_ref` como única relación
+canónica. El campo
 local `activityDisplayName` solo recuerda esa descripción para la interfaz y
 no sustituye ni expone el identificador real de Garmin. El diario ofrece un
 selector de anotaciones por fecha, actividad y comentario para facilitar su
-edición.
+edición. La cuadrícula del diario muestra asimismo el día de la semana y la
+fecha dentro de la descripción completa de la actividad.
+
+El botón `Actualizar actividades` del diario reutiliza el flujo privado de
+`--list-activities` con tokens no interactivos. Consulta los últimos 90 días
+con final inclusivo en la fecha local del botón y solo reemplaza el catálogo
+guardado después de recibir y validar una lista nueva. Un fallo conserva el
+catálogo anterior y no modifica las anotaciones.
 
 ## Series temporales
 
@@ -378,6 +387,20 @@ resultados permanecen solo en el PC sin advertir esta posibilidad.
 Al cambiar de perfil, el lanzador debe limpiar último archivo, actividad y log.
 Durante una operación debe bloquear cualquier acción que pueda cambiar perfil,
 sesión, contexto o rutas.
+
+## Actualizaciones
+
+El lanzador consulta como máximo una vez cada 24 horas el endpoint público de
+la última Release de GitHub y permite forzar la consulta mediante un botón. La
+petición usa `User-Agent`, `Accept` y versión de API explícitos, tiene un timeout
+corto y nunca incluye datos de Garmin. Un fallo debe ser silencioso durante la
+comprobación automática y no puede impedir usar la aplicación.
+
+El aviso automático se muestra una sola vez por cada etiqueta nueva. La
+aplicación nunca descarga, sustituye ni ejecuta actualizaciones por sí sola.
+Debe explicar que perfiles, sesión, anotaciones y caché permanecen bajo
+`%LOCALAPPDATA%\GarminDataExportLauncher`, y los informes en Documentos, por lo
+que cambiar la carpeta portable no los elimina.
 
 ## Caché
 
@@ -528,7 +551,7 @@ capturar una ventana asociada a un perfil real.
 dotnet restore GarminDataExport.slnx
 dotnet build GarminDataExport.slnx --no-restore
 dotnet run --project GarminDataExport.csproj -- --help
-.\scripts\Build-PortableRelease.ps1 -Version 3.6.0
+.\scripts\Build-PortableRelease.ps1 -Version 3.7.0
 ```
 
 También:

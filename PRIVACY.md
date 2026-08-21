@@ -39,9 +39,12 @@ Garmin Connect. El uso de ese servicio también está sujeto a las condiciones y
 la política de privacidad de Garmin.
 
 La aplicación no incorpora analítica, publicidad, seguimiento, afiliados,
-actualización automática ni un servidor propio. Descargar el programa o abrir
-un enlace del README sí implica utilizar GitHub según las decisiones del
-usuario y las políticas de GitHub.
+descarga automática de actualizaciones ni un servidor propio. Una vez al día
+consulta la última Release pública de GitHub; también puede hacerse mediante
+el botón «Comprobar versión». Esta petición no incluye credenciales, datos de
+Garmin, anotaciones ni exportaciones, pero GitHub recibe los datos técnicos
+habituales de una conexión web, como la dirección IP. La descarga y la
+instalación requieren siempre una acción expresa de la persona.
 
 SignPath, si acepta el proyecto, solo recibirá artefactos públicos de
 compilación durante el proceso del mantenedor. La firma no transfiere a
@@ -55,6 +58,7 @@ Los datos se guardan en el PC:
 |---|---|
 | Exportaciones | `Documentos\Garmin para IA\NOMBRE_DEL_PERFIL\` |
 | Perfiles, tokens, caché, carrera y diario | `%LOCALAPPDATA%\GarminDataExportLauncher\` |
+| Última comprobación pública de versión | `%LOCALAPPDATA%\GarminDataExportLauncher\actualizaciones.json` |
 | Sesión heredada, si existe | `%USERPROFILE%\.garminconnect\` |
 
 La carpeta Documentos puede estar redirigida a OneDrive u otro sistema de
