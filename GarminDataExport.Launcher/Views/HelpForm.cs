@@ -31,7 +31,7 @@ internal sealed class HelpForm : Form
             """
             Sincroniza el reloj con Garmin Connect.
 
-            Después de una sesión importante, completa la autoevaluación de Garmin. Si quieres aportar información que el reloj no conoce, abre «Mi diario» y escribe un comentario. Se incluirá automáticamente en el informe para la IA. La actividad aparece con su nombre, distancia y duración. Para editar, elige una anotación guardada y pulsa «Abrir anotación»; también puedes hacer doble clic en la tabla.
+            Después de una sesión importante, completa la autoevaluación de Garmin. Si quieres aportar información que el reloj no conoce, abre «Mi diario» y escribe un comentario. Se incluirá automáticamente en el informe para la IA. La actividad aparece con el día de la semana, fecha, nombre, distancia y duración. Si falta una sesión reciente, pulsa «Actualizar actividades». Para editar, elige una anotación guardada y pulsa «Abrir anotación»; también puedes hacer doble clic en la tabla.
 
             No hace falta exportar todos los días. El diario es opcional y conviene reservarlo para entrenamientos importantes.
             """));
@@ -74,6 +74,15 @@ internal sealed class HelpForm : Form
             Los resultados se guardan dentro de tu carpeta Documentos. Si Windows tiene Documentos sincronizado con OneDrive u otro servicio, también podría sincronizar esos archivos. Comprueba tu configuración si quieres que permanezcan únicamente en este PC.
 
             Si varias personas usan el mismo PC, lo más seguro es que cada una tenga una cuenta de Windows diferente.
+            """));
+        tabs.TabPages.Add(CreatePage(
+            "Actualizar",
+            """
+            ExportaGarmin comprueba una vez al día si existe una versión nueva. También puedes pulsar «Comprobar versión» en la parte superior.
+
+            Si hay una actualización, abre la página oficial, descarga el ZIP, extráelo en una carpeta nueva y abre el nuevo ExportaGarmin.exe. La descarga y la instalación nunca se hacen solas.
+
+            Tus perfiles, sesión de Garmin, anotaciones y caché se guardan fuera de la carpeta del programa. También se conservan los informes de Documentos. Por eso puedes cambiar de versión sin copiar ni configurar de nuevo esos datos.
             """));
 
         var closeButton = new Button

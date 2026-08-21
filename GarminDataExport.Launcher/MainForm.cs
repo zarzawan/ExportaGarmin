@@ -65,6 +65,7 @@ internal sealed class MainForm : Form
     private readonly Label _outputPreview = new();
     private readonly Label _status = new();
     private readonly ProgressBar _progress = new();
+    private readonly Button _updateButton = new();
     private readonly Button _runButton = new();
     private readonly Button _cancelButton = new();
     private readonly Button _openFolderButton = new();
@@ -75,6 +76,8 @@ internal sealed class MainForm : Form
     private string? _projectRoot;
     private Process? _currentProcess;
     private bool _cancelRequested;
+    private bool _checkingForUpdate;
+    private string? _availableUpdateUrl;
     private string? _verifiedSessionProfileId;
     private List<string> _lastOutputFiles = [];
 
@@ -117,7 +120,10 @@ internal sealed class MainForm : Form
         ShowStorageRecoveryNotices();
         await DetectBackendAsync();
         if (_capabilities?.IsReady != true)
+        {
+            await CheckForUpdatesAsync(showCurrentResult: false);
             return;
+        }
 
         if (!_settings.FirstRunCompleted)
         {
@@ -138,6 +144,7 @@ internal sealed class MainForm : Form
                 _status.Text = "Puedes consultar la ayuda cuando quieras desde «Guía sencilla».";
             }
         }
+        await CheckForUpdatesAsync(showCurrentResult: false);
     }
 
     private void BuildInterface()
@@ -217,14 +224,34 @@ internal sealed class MainForm : Form
         });
         panel.Controls.Add(titles, 0, 0);
 
+        var headerActions = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            FlowDirection = FlowDirection.LeftToRight,
+            WrapContents = false,
+            Margin = new Padding(8, 8, 0, 0),
+        };
+        _updateButton.Text = $"Comprobar versión {UpdateChecker.CurrentVersion}";
+        _updateButton.AutoSize = true;
+        _updateButton.Padding = new Padding(12, 5, 12, 5);
+        _updateButton.Click += async (_, _) =>
+        {
+            if (!string.IsNullOrWhiteSpace(_availableUpdateUrl))
+                OpenUpdatePage(_availableUpdateUrl);
+            else
+                await CheckForUpdatesAsync(showCurrentResult: true, force: true);
+        };
+        headerActions.Controls.Add(_updateButton);
+
         var help = MakeButton("Guía sencilla");
-        help.Margin = new Padding(8, 8, 0, 0);
+        help.Margin = new Padding(8, 0, 0, 0);
         help.Click += (_, _) =>
         {
             using var form = new HelpForm();
             form.ShowDialog(this);
         };
-        panel.Controls.Add(help, 1, 0);
+        headerActions.Controls.Add(help);
+        panel.Controls.Add(headerActions, 1, 0);
         return panel;
     }
 
@@ -979,7 +1006,8 @@ internal sealed class MainForm : Form
         using var form = new JournalForm(
             _activeProfile,
             activityId,
-            ReadRecentActivitiesForJournal(_activeProfile));
+            ReadRecentActivitiesForJournal(_activeProfile),
+            RefreshActivitiesForJournalAsync);
         ShowStorageRecoveryNotices();
         form.ShowDialog(this);
     }
@@ -1000,6 +1028,92 @@ internal sealed class MainForm : Form
             JsonException)
         {
             return [];
+        }
+    }
+
+    private async Task<IReadOnlyList<RecentActivity>> RefreshActivitiesForJournalAsync()
+    {
+        if (_activeProfile is null || _projectRoot is null ||
+            _capabilities?.IsReady != true)
+        {
+            throw new InvalidOperationException(RepairInstallationMessage);
+        }
+        if (SessionLoginLauncher.IsRunning)
+        {
+            throw new InvalidOperationException(
+                "Termina o cierra primero la ventana de inicio de sesión.");
+        }
+        if (!AppPaths.HasSession(_activeProfile))
+            throw new InvalidOperationException("Primero inicia sesión en Garmin.");
+        if (!_capabilities.Supports("--list-activities"))
+        {
+            throw new InvalidOperationException(
+                "Esta instalación no puede actualizar la lista de actividades.");
+        }
+
+        _cancelRequested = false;
+        _status.Text = "Actualizando las actividades del diario…";
+        _logBox.Clear();
+        try
+        {
+            var activities = await DownloadRecentActivitiesAsync(_activeProfile, 90);
+            _verifiedSessionProfileId = _activeProfile.Id;
+            _status.Text = "Actividades del diario actualizadas.";
+            return activities;
+        }
+        catch
+        {
+            _status.Text = "No se pudieron actualizar las actividades del diario.";
+            throw;
+        }
+    }
+
+    private async Task<IReadOnlyList<RecentActivity>> DownloadRecentActivitiesAsync(
+        UserProfile profile,
+        int days)
+    {
+        var listPath = AppPaths.ActivityListFile(profile);
+        var listDirectory = Path.GetDirectoryName(listPath)!;
+        Directory.CreateDirectory(listDirectory);
+        var refreshedListPath = Path.Combine(
+            listDirectory,
+            $"activities-refresh-{Guid.NewGuid():N}.json");
+        var listRequestedAt = DateTime.UtcNow;
+        var endDate = DateTime.Today;
+        var startDate = endDate.AddDays(-(days - 1));
+        var startInfo = CreateBaseStartInfo();
+        AddOption(startInfo, "--list-activities", refreshedListPath);
+        AddOption(startInfo, "--days", days.ToString(CultureInfo.InvariantCulture));
+        AddOption(startInfo, "--start-date", startDate.ToString("yyyy-MM-dd"));
+        AddOption(startInfo, "--end-date", endDate.ToString("yyyy-MM-dd"));
+        AddOption(startInfo, "--tokenstore", AppPaths.TokenStore(profile));
+        AddOption(startInfo, "--ignore-credential-env");
+        AddOption(startInfo, "--non-interactive-auth");
+        if (_capabilities?.Supports("--cache-dir") == true)
+            AddOption(startInfo, "--cache-dir", AppPaths.CacheDirectory(profile));
+
+        try
+        {
+            var exitCode = await RunProcessAsync(startInfo);
+            if (_cancelRequested)
+                throw new OperationCanceledException();
+            if (exitCode != 0)
+                throw new InvalidOperationException("No se pudo obtener la lista de actividades.");
+            if (!File.Exists(refreshedListPath) ||
+                File.GetLastWriteTimeUtc(refreshedListPath) < listRequestedAt.AddSeconds(-2))
+            {
+                throw new InvalidOperationException("No se recibió una lista nueva de Garmin.");
+            }
+
+            var activities = RecentActivityReader.Read(refreshedListPath);
+            if (activities.Count == 0)
+                throw new InvalidOperationException("Garmin no devolvió actividades recientes.");
+            File.Move(refreshedListPath, listPath, overwrite: true);
+            return activities;
+        }
+        finally
+        {
+            TryDeleteGeneratedFile(refreshedListPath);
         }
     }
 
@@ -1043,36 +1157,8 @@ internal sealed class MainForm : Form
         _logBox.Clear();
         try
         {
-            var listPath = AppPaths.ActivityListFile(_activeProfile);
-            Directory.CreateDirectory(Path.GetDirectoryName(listPath)!);
-            TryDeleteGeneratedFile(listPath);
-            var listRequestedAt = DateTime.UtcNow;
-            var startInfo = CreateBaseStartInfo();
-            AddOption(startInfo, "--list-activities", listPath);
-            AddOption(startInfo, "--days", "90");
-            AddOption(startInfo, "--tokenstore", AppPaths.TokenStore(_activeProfile));
-            AddOption(startInfo, "--ignore-credential-env");
-            AddOption(startInfo, "--non-interactive-auth");
-            if (_capabilities.Supports("--cache-dir"))
-                AddOption(startInfo, "--cache-dir", AppPaths.CacheDirectory(_activeProfile));
-
-            var exitCode = await RunProcessAsync(startInfo);
-            if (_cancelRequested)
-            {
-                _status.Text = "Búsqueda de actividades cancelada.";
-                return;
-            }
-            if (exitCode != 0)
-                throw new InvalidOperationException("No se pudo obtener la lista de actividades.");
+            var activities = await DownloadRecentActivitiesAsync(_activeProfile, 90);
             _verifiedSessionProfileId = _activeProfile.Id;
-            if (!File.Exists(listPath) ||
-                File.GetLastWriteTimeUtc(listPath) < listRequestedAt.AddSeconds(-2))
-            {
-                throw new InvalidOperationException("No se recibió una lista nueva de Garmin.");
-            }
-            var activities = RecentActivityReader.Read(listPath);
-            if (activities.Count == 0)
-                throw new InvalidOperationException("Garmin no devolvió actividades recientes.");
 
             using var picker = new ActivityPickerForm(activities);
             if (picker.ShowDialog(this) == DialogResult.OK &&
@@ -1091,6 +1177,10 @@ internal sealed class MainForm : Form
                 RefreshOutputPreview();
             }
             _status.Text = "Actividad preparada.";
+        }
+        catch (OperationCanceledException)
+        {
+            _status.Text = "Búsqueda de actividades cancelada.";
         }
         catch (Exception ex)
         {
@@ -1729,6 +1819,114 @@ internal sealed class MainForm : Form
             FileName = file,
             UseShellExecute = true,
         });
+    }
+
+    private async Task CheckForUpdatesAsync(
+        bool showCurrentResult,
+        bool force = false)
+    {
+        if (_checkingForUpdate || _readmePreviewMode is not null)
+            return;
+
+        _checkingForUpdate = true;
+        _updateButton.Enabled = false;
+        var originalText = _updateButton.Text;
+        _updateButton.Text = "Comprobando versión…";
+        try
+        {
+            var result = await UpdateChecker.CheckAsync(force);
+            if (IsDisposed)
+                return;
+
+            if (!result.Success)
+            {
+                _updateButton.Text = originalText;
+                if (showCurrentResult)
+                {
+                    MessageBox.Show(
+                        this,
+                        "No se ha podido comprobar la versión. " +
+                        "Revisa la conexión a Internet e inténtalo más tarde.",
+                        "Comprobar versión",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+                return;
+            }
+
+            if (!result.UpdateAvailable)
+            {
+                _availableUpdateUrl = null;
+                _updateButton.Text = $"Versión {result.CurrentVersion} al día";
+                if (showCurrentResult)
+                {
+                    MessageBox.Show(
+                        this,
+                        $"Ya tienes la última versión de ExportaGarmin ({result.CurrentVersion}).",
+                        "ExportaGarmin está actualizado",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+                }
+                return;
+            }
+
+            _availableUpdateUrl = result.ReleaseUrl;
+            _updateButton.Text = $"Descargar versión {result.LatestVersion}";
+            _updateButton.ForeColor = Color.FromArgb(166, 92, 20);
+            _updateButton.Font = new Font(_updateButton.Font, FontStyle.Bold);
+            if (!showCurrentResult && !result.ShouldNotify)
+                return;
+
+            UpdateChecker.MarkNotified(result.LatestTag);
+            var answer = MessageBox.Show(
+                this,
+                $"Hay una nueva versión de ExportaGarmin: {result.LatestVersion}.\n\n" +
+                "Descarga el ZIP, extráelo en una carpeta nueva y abre el nuevo " +
+                "ExportaGarmin.exe.\n\n" +
+                "Tus perfiles, sesión de Garmin, anotaciones y caché se conservan " +
+                "automáticamente porque se guardan fuera de la carpeta del programa. " +
+                "También se mantienen los archivos ya creados en Documentos.\n\n" +
+                "¿Quieres abrir ahora la página oficial de descarga?",
+                "Nueva versión disponible",
+                MessageBoxButtons.YesNo,
+                MessageBoxIcon.Information);
+            if (answer == DialogResult.Yes)
+                OpenUpdatePage(result.ReleaseUrl);
+        }
+        finally
+        {
+            if (!IsDisposed)
+                _updateButton.Enabled = true;
+            _checkingForUpdate = false;
+        }
+    }
+
+    private void OpenUpdatePage(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+            uri.Scheme != Uri.UriSchemeHttps ||
+            !string.Equals(uri.Host, "github.com", StringComparison.OrdinalIgnoreCase))
+        {
+            ShowError("La dirección de actualización no es válida.");
+            return;
+        }
+
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = uri.AbsoluteUri,
+                UseShellExecute = true,
+            });
+        }
+        catch (Exception exception) when (
+            exception is InvalidOperationException or
+            System.ComponentModel.Win32Exception)
+        {
+            ShowError(
+                "No se pudo abrir el navegador. Entra en la página oficial de " +
+                "ExportaGarmin en GitHub y abre «Releases».");
+        }
     }
 
     private void DatePickerChanged(object? sender, EventArgs e)

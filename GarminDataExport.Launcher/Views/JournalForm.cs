@@ -1,5 +1,6 @@
 using GarminDataExport.Launcher.Models;
 using GarminDataExport.Launcher.Services;
+using System.Globalization;
 using System.Text.RegularExpressions;
 
 namespace GarminDataExport.Launcher.Views;
@@ -9,13 +10,18 @@ internal sealed class JournalForm : Form
     private readonly string _path;
     private readonly string _initialActivityId;
     private readonly bool _isPreview;
-    private readonly IReadOnlyDictionary<string, RecentActivity> _activitiesById;
+    private readonly Func<Task<IReadOnlyList<RecentActivity>>>? _refreshActivitiesAsync;
+    private readonly Dictionary<string, RecentActivity> _activitiesById =
+        new(StringComparer.Ordinal);
     private JournalDocument _document;
     private string? _editingEntryId;
+    private bool _isRefreshingActivities;
 
     private readonly DateTimePicker _date = new();
     private readonly TextBox _activityId = new();
     private readonly ComboBox _activityPicker = new();
+    private readonly Button _refreshActivitiesButton = MakeButton("Actualizar actividades");
+    private readonly Label _activityRefreshStatus = new();
     private readonly TextBox _purpose = new();
     private readonly ComboBox _pain = CreateScoreCombo(0, 10);
     private readonly TextBox _painLocation = new();
@@ -43,19 +49,14 @@ internal sealed class JournalForm : Form
         UserProfile profile,
         string? activityId = null,
         IReadOnlyList<RecentActivity>? activities = null,
+        Func<Task<IReadOnlyList<RecentActivity>>>? refreshActivitiesAsync = null,
         JournalDocument? previewDocument = null)
     {
         _isPreview = previewDocument is not null;
         _path = _isPreview ? "" : AppPaths.JournalFile(profile);
         _initialActivityId = activityId?.Trim() ?? "";
-        _activitiesById = (activities ?? [])
-            .Where(activity => IsPrivateActivityReferenceOrEmpty(activity.Id) &&
-                               !string.IsNullOrWhiteSpace(activity.Id))
-            .GroupBy(activity => activity.Id, StringComparer.Ordinal)
-            .ToDictionary(
-                group => group.Key,
-                group => group.First(),
-                StringComparer.Ordinal);
+        _refreshActivitiesAsync = refreshActivitiesAsync;
+        ReplaceActivityCatalog(activities ?? []);
         _document = previewDocument ??
             AtomicJsonStore.Read<JournalDocument>(_path) ??
             new JournalDocument();
@@ -97,6 +98,7 @@ internal sealed class JournalForm : Form
         _cancelEditButton.Click += (_, _) => StartNewEntry();
         _editButton.Click += (_, _) => EditSelectedEntry();
         _deleteButton.Click += (_, _) => DeleteSelectedEntry();
+        _refreshActivitiesButton.Click += async (_, _) => await RefreshActivitiesAsync();
         _recentEntries.CellDoubleClick += (_, eventArgs) =>
         {
             if (eventArgs.RowIndex >= 0)
@@ -109,6 +111,14 @@ internal sealed class JournalForm : Form
             UpdateSelectionButtons();
         };
         _entrySelector.SelectedIndexChanged += (_, _) => UpdateSelectionButtons();
+        FormClosing += (_, eventArgs) =>
+        {
+            if (!_isRefreshingActivities)
+                return;
+            eventArgs.Cancel = true;
+            _activityRefreshStatus.Text =
+                "Espera a que termine la actualización antes de cerrar.";
+        };
 
         ConfigureInputs();
         StartNewEntry();
@@ -117,7 +127,10 @@ internal sealed class JournalForm : Form
         {
             _recentEntries.ClearSelection();
             UpdateSelectionButtons();
-            _comment.Focus();
+            if (_isPreview)
+                _refreshActivitiesButton.Focus();
+            else
+                _comment.Focus();
         });
     }
 
@@ -189,6 +202,7 @@ internal sealed class JournalForm : Form
             profile,
             "activity_123456789abc",
             activities,
+            () => Task.FromResult<IReadOnlyList<RecentActivity>>(activities),
             document);
     }
 
@@ -249,18 +263,28 @@ internal sealed class JournalForm : Form
         {
             AutoSize = true,
             Dock = DockStyle.Fill,
-            ColumnCount = 4,
+            ColumnCount = 5,
             Margin = new Padding(0, 0, 0, 8),
         };
         context.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         context.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 170));
         context.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         context.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        context.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         context.Controls.Add(MakeLabel("Fecha"), 0, 0);
         context.Controls.Add(Prepare(_date), 1, 0);
         context.Controls.Add(MakeLabel("Actividad"), 2, 0);
         context.Controls.Add(Prepare(_activityPicker), 3, 0);
+        _refreshActivitiesButton.Margin = new Padding(0, 3, 0, 6);
+        context.Controls.Add(_refreshActivitiesButton, 4, 0);
         editor.Controls.Add(context);
+
+        _activityRefreshStatus.AutoSize = true;
+        _activityRefreshStatus.Text =
+            "Trae de Garmin las actividades de los últimos 90 días hasta hoy.";
+        _activityRefreshStatus.ForeColor = Color.FromArgb(78, 91, 108);
+        _activityRefreshStatus.Margin = new Padding(222, -6, 0, 9);
+        editor.Controls.Add(_activityRefreshStatus);
 
         editor.Controls.Add(new Label
         {
@@ -498,6 +522,7 @@ internal sealed class JournalForm : Form
         _date.Format = DateTimePickerFormat.Short;
         _date.MaxDate = DateTime.Today;
         _activityPicker.DropDownStyle = ComboBoxStyle.DropDownList;
+        _refreshActivitiesButton.Enabled = _refreshActivitiesAsync is not null;
         PopulateActivityPicker();
         _activityPicker.SelectedIndexChanged += (_, _) =>
         {
@@ -784,7 +809,7 @@ internal sealed class JournalForm : Form
                      .ThenByDescending(item => item.CreatedAtUtc)
                      .Take(100))
         {
-            var context = ActivityDisplayName(entry);
+            var context = ActivitySummary(entry);
             if (string.Equals(context, "Sin actividad", StringComparison.Ordinal))
                 context = entry.IntendedPurpose;
             var comment = string.IsNullOrWhiteSpace(entry.PrivateComment)
@@ -794,7 +819,7 @@ internal sealed class JournalForm : Form
                 comment = comment[..67] + "…";
             var parts = new[]
             {
-                entry.Date.ToString("dd/MM/yyyy"),
+                FormatDateWithWeekday(entry.Date),
                 context,
                 comment,
             }.Where(value => !string.IsNullOrWhiteSpace(value));
@@ -889,6 +914,78 @@ internal sealed class JournalForm : Form
         entry.SodiumMilligramsPerHour is not null ||
         !string.IsNullOrWhiteSpace(entry.GastrointestinalTolerance);
 
+    private async Task RefreshActivitiesAsync()
+    {
+        if (_refreshActivitiesAsync is null || _isRefreshingActivities)
+            return;
+
+        var selectedReference = _activityId.Text.Trim();
+        var selectedDisplay = CurrentActivityDisplayName();
+        _isRefreshingActivities = true;
+        _refreshActivitiesButton.Enabled = false;
+        _activityPicker.Enabled = false;
+        _saveButton.Enabled = false;
+        UseWaitCursor = true;
+        _activityRefreshStatus.ForeColor = Color.FromArgb(38, 91, 153);
+        _activityRefreshStatus.Text = "Consultando Garmin…";
+        try
+        {
+            var activities = await _refreshActivitiesAsync();
+            if (IsDisposed)
+                return;
+
+            ReplaceActivityCatalog(activities);
+            PopulateActivityPicker();
+            SetActivityReference(selectedReference, selectedDisplay);
+            RefreshEntries();
+            _activityRefreshStatus.ForeColor = Color.FromArgb(42, 112, 72);
+            _activityRefreshStatus.Text =
+                $"Lista actualizada hasta hoy: {activities.Count} actividades disponibles.";
+        }
+        catch (OperationCanceledException)
+        {
+            _activityRefreshStatus.ForeColor = Color.FromArgb(130, 91, 30);
+            _activityRefreshStatus.Text = "Actualización cancelada.";
+        }
+        catch (InvalidOperationException exception)
+        {
+            _activityRefreshStatus.ForeColor = Color.FromArgb(166, 55, 55);
+            _activityRefreshStatus.Text = exception.Message;
+        }
+        catch (Exception)
+        {
+            _activityRefreshStatus.ForeColor = Color.FromArgb(166, 55, 55);
+            _activityRefreshStatus.Text =
+                "No se pudo actualizar. Comprueba la sesión e inténtalo de nuevo.";
+        }
+        finally
+        {
+            if (!IsDisposed)
+            {
+                _isRefreshingActivities = false;
+                _refreshActivitiesButton.Enabled = true;
+                _activityPicker.Enabled = true;
+                _saveButton.Enabled = true;
+                UseWaitCursor = false;
+            }
+        }
+    }
+
+    private void ReplaceActivityCatalog(IEnumerable<RecentActivity> activities)
+    {
+        _activitiesById.Clear();
+        foreach (var activity in activities)
+        {
+            if (string.IsNullOrWhiteSpace(activity.Id) ||
+                !IsPrivateActivityReferenceOrEmpty(activity.Id) ||
+                _activitiesById.ContainsKey(activity.Id))
+            {
+                continue;
+            }
+            _activitiesById.Add(activity.Id, activity);
+        }
+    }
+
     private void PopulateActivityPicker()
     {
         _activityPicker.Items.Clear();
@@ -926,18 +1023,32 @@ internal sealed class JournalForm : Form
 
     private string CurrentActivityDisplayName() =>
         _activityPicker.SelectedItem is ActivityChoice choice
-            ? choice.ShortDisplay
+            ? choice.Display
             : "";
 
     private string ActivityDisplayName(JournalEntry entry)
     {
         if (_activitiesById.TryGetValue(entry.ActivityId, out var activity))
-            return activity.ToShortString();
+            return activity.ToString();
         if (!string.IsNullOrWhiteSpace(entry.ActivityDisplayName))
             return entry.ActivityDisplayName;
         return string.IsNullOrWhiteSpace(entry.ActivityId)
             ? "Sin actividad"
             : "Actividad vinculada";
+    }
+
+    private string ActivitySummary(JournalEntry entry)
+    {
+        if (_activitiesById.TryGetValue(entry.ActivityId, out var activity))
+            return activity.ToShortString();
+        return ActivityDisplayName(entry);
+    }
+
+    private static string FormatDateWithWeekday(DateTime date)
+    {
+        var culture = CultureInfo.GetCultureInfo("es-ES");
+        var weekday = culture.TextInfo.ToTitleCase(date.ToString("dddd", culture));
+        return $"{weekday} {date:dd/MM/yyyy}";
     }
 
     private void DeleteSelectedEntry()

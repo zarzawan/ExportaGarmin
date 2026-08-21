@@ -46,7 +46,7 @@ Necesitas Windows 11, conexión a Internet y una cuenta de Garmin Connect.
 
 1. Abre la página
    [Última versión de ExportaGarmin](https://github.com/zarzawan/ExportaGarmin/releases/latest).
-2. En **Assets**, descarga `ExportaGarmin-3.6.0-Windows-x64.zip`.
+2. En **Assets**, descarga `ExportaGarmin-3.7.0-Windows-x64.zip`.
 3. No descargues **Source code**: esos enlaces son para programadores.
 4. Abre la carpeta **Descargas**.
 5. Pulsa con el botón derecho sobre el ZIP y elige **Extraer todo**.
@@ -82,11 +82,11 @@ La descarga incluye un archivo `.sha256`. Para comprobar su integridad, abre
 PowerShell dentro de Descargas y ejecuta:
 
 ```powershell
-Get-FileHash .\ExportaGarmin-3.6.0-Windows-x64.zip -Algorithm SHA256
+Get-FileHash .\ExportaGarmin-3.7.0-Windows-x64.zip -Algorithm SHA256
 ```
 
 El resultado debe coincidir con el contenido de
-`ExportaGarmin-3.6.0-Windows-x64.zip.sha256`.
+`ExportaGarmin-3.7.0-Windows-x64.zip.sha256`.
 
 </details>
 
@@ -130,7 +130,8 @@ El botón **Guía sencilla** explica el uso sin salir del programa:
 - qué conviene hacer cada día;
 - revisión semanal;
 - revisión mensual;
-- privacidad.
+- privacidad;
+- cómo actualizar sin perder perfiles, anotaciones ni caché.
 
 Puedes volver a abrir esa guía en cualquier momento.
 
@@ -262,7 +263,8 @@ decisión; para incluir uno, ábrelo, revísalo y pulsa **Guardar cambios**.
 
 La pantalla muestra primero solo las opciones más utilizadas:
 
-- actividad, con su nombre, distancia y duración para reconocerla fácilmente;
+- actividad, con día de la semana, fecha, nombre, distancia y duración para
+  reconocerla fácilmente;
 - objetivo de una sesión;
 - esfuerzo percibido;
 - dolor.
@@ -273,7 +275,13 @@ Las anotaciones guardadas muestran el comentario con varias líneas. Para
 editar una, elígela en el desplegable **Editar** y pulsa **Abrir anotación**.
 También puedes hacer doble clic sobre su fila. El selector utiliza la fecha,
 el nombre de la actividad y un resumen del comentario para que sea fácil
-distinguirlas.
+distinguirlas. La cuadrícula también conserva el día de la semana y la fecha
+junto a la actividad.
+
+Si falta una sesión reciente, pulsa **Actualizar actividades** dentro del
+diario. El programa consulta Garmin y renueva la lista de los últimos 90 días
+hasta hoy. Esta acción solo actualiza el catálogo para elegir actividades; no
+borra ni cambia las anotaciones guardadas.
 
 La autoevaluación de Garmin sigue siendo la fuente recomendada para esfuerzo y
 sensaciones de cada actividad. El diario la complementa, no la sustituye.
@@ -445,6 +453,11 @@ Todo ello queda fuera del repositorio o está cubierto por `.gitignore`.
 
 ## Reparar o actualizar
 
+ExportaGarmin comprueba una vez al día si existe una versión nueva. El botón
+**Comprobar versión** permite repetir la consulta cuando quieras. Si hay una
+actualización, muestra un aviso una sola vez para esa versión y ofrece abrir la
+página oficial. El programa no descarga ni instala nada automáticamente.
+
 1. Cierra `ExportaGarmin.exe`.
 2. Descarga el ZIP de la nueva versión desde GitHub Releases.
 3. Extráelo por completo en una carpeta nueva.
@@ -453,6 +466,11 @@ Todo ello queda fuera del repositorio o está cubierto por `.gitignore`.
 Los perfiles, sesiones, caché, carreras, diarios y exportaciones se guardan
 fuera de la carpeta del programa. Actualizar o sustituir esa carpeta no los
 borra.
+
+La comprobación consulta únicamente la última Release pública de GitHub. No
+envía a GitHub credenciales, datos de Garmin, anotaciones ni exportaciones. La
+conexión sí queda sujeta a la política de GitHub y a los datos técnicos
+habituales de una conexión web, como la dirección IP.
 
 `Instalar.bat` se conserva únicamente para desarrolladores que trabajen con
 el código fuente. Los usuarios de la versión descargable no deben ejecutarlo.
@@ -548,7 +566,7 @@ dotnet build GarminDataExport.slnx --no-restore
 Crear localmente la misma descarga portable que publica GitHub:
 
 ```powershell
-.\scripts\Build-PortableRelease.ps1 -Version 3.6.0
+.\scripts\Build-PortableRelease.ps1 -Version 3.7.0
 ```
 
 El resultado queda en `artifacts\` e incluye el ZIP y su SHA-256. GitHub
