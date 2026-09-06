@@ -8,9 +8,6 @@
     <Nullable>enable</Nullable>
     <RootNamespace>GarminDataExport.Launcher</RootNamespace>
     <AssemblyName>ExportaGarmin</AssemblyName>
-    <Version>3.7.0</Version>
-    <AssemblyVersion>3.7.0.0</AssemblyVersion>
-    <FileVersion>3.7.0.0</FileVersion>
     <Product>ExportaGarmin</Product>
     <AssemblyTitle>ExportaGarmin</AssemblyTitle>
     <Description>Tus datos de Garmin, ordenados y preparados para la IA.</Description>
@@ -24,6 +21,10 @@
     <RepositoryUrl>https://github.com/zarzawan/ExportaGarmin</RepositoryUrl>
     <NeutralLanguage>es-ES</NeutralLanguage>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="GarminDataExport.Tests" />
+  </ItemGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>

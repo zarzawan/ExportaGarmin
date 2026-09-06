@@ -25,23 +25,31 @@ internal static class UpdateChecker
 
     public static string CurrentVersion => FormatVersion(GetCurrentVersion());
 
-    public static async Task<UpdateCheckResult> CheckAsync(bool force)
+    public static Task<UpdateCheckResult> CheckAsync(bool force) =>
+        CheckAsync(force, Client, AppPaths.UpdateCheckFile, DateTime.UtcNow);
+
+    internal static async Task<UpdateCheckResult> CheckAsync(
+        bool force, HttpClient client, string statePath, DateTime now)
     {
         var current = GetCurrentVersion();
-        var state = ReadState();
+        var state = ReadState(statePath);
+        var lastAttempt = state.LastAttemptUtc == default ? state.LastCheckedUtc : state.LastAttemptUtc;
         if (!force &&
-            state.LastCheckedUtc > DateTime.UtcNow - CacheLifetime &&
-            state.LastCheckedUtc <= DateTime.UtcNow.AddMinutes(5) &&
-            TryParseVersion(state.LatestTag, out var cachedLatest))
+            lastAttempt > now - CacheLifetime &&
+            lastAttempt <= now.AddMinutes(5))
         {
-            return CreateResult(current, cachedLatest, state);
+            return state.LastAttemptSucceeded && TryParseVersion(state.LatestTag, out var cachedLatest)
+                ? CreateResult(current, cachedLatest, state) : Failed(current);
         }
 
+        state.LastAttemptUtc = now;
+        state.LastAttemptSucceeded = false;
+        TryWriteState(state, statePath);
         try
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, LatestReleaseApi);
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(8));
-            using var response = await Client.SendAsync(
+            using var response = await client.SendAsync(
                 request,
                 HttpCompletionOption.ResponseHeadersRead,
                 timeout.Token);
@@ -58,9 +66,10 @@ internal static class UpdateChecker
             if (!TryParseVersion(tag, out var latest))
                 return Failed(current);
 
-            state.LastCheckedUtc = DateTime.UtcNow;
+            state.LastCheckedUtc = now;
+            state.LastAttemptSucceeded = true;
             state.LatestTag = tag;
-            TryWriteState(state);
+            TryWriteState(state, statePath);
             return CreateResult(current, latest, state);
         }
         catch (Exception exception) when (
@@ -152,11 +161,11 @@ internal static class UpdateChecker
     private static string FormatVersion(Version version) =>
         $"{version.Major}.{version.Minor}.{Math.Max(0, version.Build)}";
 
-    private static UpdateCheckState ReadState()
+    private static UpdateCheckState ReadState(string? path = null)
     {
         try
         {
-            return AtomicJsonStore.Read<UpdateCheckState>(AppPaths.UpdateCheckFile) ?? new();
+            return AtomicJsonStore.Read<UpdateCheckState>(path ?? AppPaths.UpdateCheckFile) ?? new();
         }
         catch (InvalidDataException)
         {
@@ -164,11 +173,11 @@ internal static class UpdateChecker
         }
     }
 
-    private static void TryWriteState(UpdateCheckState state)
+    private static void TryWriteState(UpdateCheckState state, string? path = null)
     {
         try
         {
-            AtomicJsonStore.Write(AppPaths.UpdateCheckFile, state);
+            AtomicJsonStore.Write(path ?? AppPaths.UpdateCheckFile, state);
         }
         catch (Exception exception) when (
             exception is IOException or
@@ -182,6 +191,8 @@ internal static class UpdateChecker
     private sealed class UpdateCheckState
     {
         public DateTime LastCheckedUtc { get; set; }
+        public DateTime LastAttemptUtc { get; set; }
+        public bool LastAttemptSucceeded { get; set; } = true;
         public string LatestTag { get; set; } = "";
         public string LastNotifiedTag { get; set; } = "";
     }

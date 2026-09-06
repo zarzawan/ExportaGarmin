@@ -36,6 +36,8 @@ internal static class SessionValidator
         startInfo.ArgumentList.Add("--non-interactive-auth");
         startInfo.ArgumentList.Add("--tokenstore");
         startInfo.ArgumentList.Add(AppPaths.TokenStore(profile));
+        startInfo.ArgumentList.Add("--cache-dir");
+        startInfo.ArgumentList.Add(AppPaths.CacheDirectory(profile));
 
         Process? process = null;
         try

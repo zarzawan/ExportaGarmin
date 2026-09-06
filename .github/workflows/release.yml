@@ -7,12 +7,15 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Versión sin el prefijo v
-        required: true
-        default: '3.7.0'
+        description: Versión sin v (vacío usa Directory.Build.props)
+        required: false
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   publicar:
@@ -33,56 +36,51 @@ jobs:
       - name: Preparar .NET 10 LTS
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
         with:
-          dotnet-version: 10.0.302
+          global-json-file: global.json
 
-      - name: Instalar dependencias para las pruebas
-        run: python -m pip install -r requirements-windows-lock.txt
+      - name: Instalar dependencias verificadas
+        run: python -m pip install --require-hashes --only-binary=:all: -r requirements-windows-lock.txt
 
       - name: Determinar versión
         id: version
         shell: pwsh
+        env:
+          REQUESTED_VERSION: ${{ inputs.version }}
         run: |
-          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
-            $version = "${{ inputs.version }}"
-          } else {
-            $version = "${{ github.ref_name }}".TrimStart('v')
+          [xml]$properties = Get-Content Directory.Build.props
+          $version = [string]$properties.Project.PropertyGroup.ExportaGarminVersion
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Versión no válida.' }
+          if ($env:REQUESTED_VERSION -and $env:REQUESTED_VERSION -cne $version) {
+            throw 'La versión solicitada no coincide con el código.'
           }
-          if ($version -notmatch '^\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$') {
-            throw "La versión no es válida: $version"
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -cne "v$version") {
+            throw 'La etiqueta no coincide con la versión del código.'
           }
           "version=$version" >> $env:GITHUB_OUTPUT
           "tag=v$version" >> $env:GITHUB_OUTPUT
 
       - name: Construir y validar la descarga
         shell: pwsh
-        run: >
-          ./scripts/Build-PortableRelease.ps1
-          -Version '${{ steps.version.outputs.version }}'
-          -BuilderPython (Get-Command python).Source
+        run: ./scripts/Build-PortableRelease.ps1 -BuilderPython (Get-Command python).Source
 
       - name: Publicar los archivos de la versión
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
         run: |
-          $version = '${{ steps.version.outputs.version }}'
-          $tag = '${{ steps.version.outputs.tag }}'
+          $version = $env:RELEASE_VERSION
+          $tag = $env:RELEASE_TAG
           $zip = "artifacts/ExportaGarmin-$version-Windows-x64.zip"
           $hash = "$zip.sha256"
-          $notes = @"
-          Descarga **ExportaGarmin-$version-Windows-x64.zip**, pulsa
-          **Extraer todo** y abre **ExportaGarmin.exe** desde la carpeta
-          extraída. No necesitas instalar nada más.
-
-          ExportaGarmin es gratuito y no tiene una firma comercial de pago.
-          Si Windows muestra un aviso y has descargado el archivo desde esta
-          página oficial, pulsa **Más información > Ejecutar de todas formas**.
-          "@
-          if (gh release view $tag 2>$null) {
-            gh release upload $tag $zip $hash --clobber
-          } else {
-            gh release create $tag $zip $hash `
-              --title "ExportaGarmin $version" `
-              --generate-notes `
-              --notes $notes
+          $notes = "docs/releases/$version.md"
+          if (-not (Test-Path -LiteralPath $notes)) { throw 'Faltan las notas revisadas de esta versión.' }
+          gh release view $tag --repo $env:GH_REPO 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            throw 'La Release ya existe. No se sustituirán sus archivos automáticamente.'
           }
+          gh release create $tag $zip $hash --repo $env:GH_REPO `
+            --target $env:GITHUB_SHA --title "ExportaGarmin $version" --notes-file $notes
+          if ($LASTEXITCODE -ne 0) { throw 'No se pudo publicar la Release.' }

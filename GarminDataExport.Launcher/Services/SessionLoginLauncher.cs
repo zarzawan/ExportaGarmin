@@ -81,7 +81,7 @@ internal static class SessionLoginLauncher
                 "set \"PYTHONNOUSERSITE=1\"",
                 "set \"PYTHONUTF8=1\"",
                 "set \"PYTHONIOENCODING=utf-8\"",
-                $"{Quote(backend.PythonPath)} {Quote(backend.ScriptPath)} --login --force-login --ignore-credential-env --tokenstore {Quote(tokenStore)}",
+                $"{Quote(backend.PythonPath)} {Quote(backend.ScriptPath)} --login --force-login --ignore-credential-env --tokenstore {Quote(tokenStore)} --cache-dir {Quote(AppPaths.CacheDirectory(profile))}",
                 "set \"GARMIN_LOGIN_EXIT_CODE=%ERRORLEVEL%\"",
                 "echo.",
                 "if \"%GARMIN_LOGIN_EXIT_CODE%\"==\"0\" (echo Sesion preparada.) else (echo No se pudo iniciar la sesion. Revisa el mensaje anterior.)",

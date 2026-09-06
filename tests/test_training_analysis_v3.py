@@ -586,7 +586,7 @@ class PrivateReferenceTests(unittest.TestCase):
                 backup_path.read_text(encoding="utf-8"),
             )
 
-    def test_activity_catalog_contains_no_raw_id_name_or_exact_time(self):
+    def test_activity_catalog_keeps_title_without_raw_id_or_exact_time(self):
         catalog = activity_catalog_entry(
             {
                 "activityId": 123456789,
@@ -601,7 +601,8 @@ class PrivateReferenceTests(unittest.TestCase):
         serialized = json.dumps(catalog)
 
         self.assertNotIn("123456789", serialized)
-        self.assertNotIn("Ruta privada", serialized)
+        self.assertIn("Ruta privada", serialized)
+        self.assertTrue(catalog["name_user_provided"])
         self.assertNotIn("06:43:21", serialized)
         self.assertEqual("2026-01-07", catalog["date"])
 
