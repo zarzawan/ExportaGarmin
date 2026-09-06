@@ -39,7 +39,7 @@ jobs:
           global-json-file: global.json
 
       - name: Instalar dependencias verificadas
-        run: python -m pip install --require-hashes --only-binary=:all: -r requirements-windows-lock.txt
+        run: 'python -m pip install --require-hashes --only-binary=:all: -r requirements-windows-lock.txt'
 
       - name: Determinar versión
         id: version
