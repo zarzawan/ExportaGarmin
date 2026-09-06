@@ -1,0 +1,8 @@
+<Project>
+  <PropertyGroup>
+    <ExportaGarminVersion>3.8.0</ExportaGarminVersion>
+    <Version>$(ExportaGarminVersion)</Version>
+    <AssemblyVersion>$(ExportaGarminVersion).0</AssemblyVersion>
+    <FileVersion>$(ExportaGarminVersion).0</FileVersion>
+  </PropertyGroup>
+</Project>

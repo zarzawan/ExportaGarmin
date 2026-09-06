@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="GarminDataExport.csproj" />
   <Project Path="GarminDataExport.Launcher/GarminDataExport.Launcher.csproj" />
+  <Project Path="GarminDataExport.Tests/GarminDataExport.Tests.csproj" />
 </Solution>

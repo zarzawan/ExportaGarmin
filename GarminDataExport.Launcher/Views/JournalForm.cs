@@ -44,6 +44,11 @@ internal sealed class JournalForm : Form
     private readonly Button _deleteButton = MakeButton("Eliminar");
     private readonly Label _editorTitle = new();
     private readonly Label _saveStatus = new();
+    private readonly TextBox _historySearch = new() { Width = 260, PlaceholderText = "Buscar fecha, actividad o comentario" };
+    private readonly Button _previousPage = MakeButton("Anterior");
+    private readonly Button _nextPage = MakeButton("Siguiente");
+    private readonly Label _historyPageLabel = new() { AutoSize = true, Margin = new Padding(8) };
+    private int _historyPage;
 
     public JournalForm(
         UserProfile profile,
@@ -373,8 +378,9 @@ internal sealed class JournalForm : Form
         {
             Dock = DockStyle.Fill,
             ColumnCount = 1,
-            RowCount = 3,
+            RowCount = 4,
         };
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -403,6 +409,12 @@ internal sealed class JournalForm : Form
         _editButton.Text = "Abrir anotación";
         entryChooser.Controls.Add(_editButton, 2, 0);
         layout.Controls.Add(entryChooser, 0, 1);
+        var navigation = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
+        navigation.Controls.AddRange([_historySearch, _previousPage, _historyPageLabel, _nextPage]);
+        layout.Controls.Add(navigation, 0, 2);
+        _historySearch.TextChanged += (_, _) => { _historyPage = 0; RefreshEntries(); };
+        _previousPage.Click += (_, _) => { _historyPage--; RefreshEntries(); };
+        _nextPage.Click += (_, _) => { _historyPage++; RefreshEntries(); };
 
         _recentEntries.Dock = DockStyle.Fill;
         _recentEntries.ReadOnly = true;
@@ -470,7 +482,7 @@ internal sealed class JournalForm : Form
             HeaderText = "Informe IA",
             Width = 90,
         });
-        layout.Controls.Add(_recentEntries, 0, 2);
+        layout.Controls.Add(_recentEntries, 0, 3);
         return group;
     }
 
@@ -772,10 +784,12 @@ internal sealed class JournalForm : Form
     private void RefreshEntries()
     {
         _recentEntries.Rows.Clear();
-        foreach (var entry in _document.Entries
-                     .OrderByDescending(item => item.Date)
-                     .ThenByDescending(item => item.CreatedAtUtc)
-                     .Take(100))
+        var page = JournalHistory.Query(_document.Entries, _historySearch.Text, _historyPage);
+        _historyPage = page.Index;
+        _previousPage.Enabled = page.Index > 0;
+        _nextPage.Enabled = page.Index + 1 < page.Pages;
+        _historyPageLabel.Text = $"Página {page.Index + 1} de {page.Pages} · {page.Total} anotaciones";
+        foreach (var entry in page.Entries)
         {
             var hasComment = !string.IsNullOrWhiteSpace(entry.PrivateComment);
             var rowIndex = _recentEntries.Rows.Add(
@@ -804,10 +818,7 @@ internal sealed class JournalForm : Form
         var selectedEntryId = _editingEntryId;
         _entrySelector.Items.Clear();
         _entrySelector.Items.Add(new EntryChoice("", "Selecciona una anotación guardada"));
-        foreach (var entry in _document.Entries
-                     .OrderByDescending(item => item.Date)
-                     .ThenByDescending(item => item.CreatedAtUtc)
-                     .Take(100))
+        foreach (var entry in JournalHistory.Query(_document.Entries, _historySearch.Text, _historyPage).Entries)
         {
             var context = ActivitySummary(entry);
             if (string.Equals(context, "Sin actividad", StringComparison.Ordinal))

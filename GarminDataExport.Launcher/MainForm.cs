@@ -787,17 +787,7 @@ internal sealed class MainForm : Form
         if (!ReferenceEquals(_profileCombo.SelectedItem, profile))
             _profileCombo.SelectedItem = profile;
         if (changedProfile)
-        {
-            _verifiedSessionProfileId = null;
-            _lastOutputFiles = [];
-            _selectedActivityId = null;
-            _selectedActivityDate = null;
-            _activityId.Clear();
-            _selectedActivity.Text = "Aún no has elegido una actividad.";
-            _logBox.Clear();
-            _openFileButton.Enabled = false;
-            _status.Text = "Perfil cambiado. Sus datos y archivos permanecen separados.";
-        }
+            ClearProfilePresentation();
         ApplyRecommendedReviewWindow();
         RefreshProfileState();
         SaveSettings();
@@ -887,7 +877,7 @@ internal sealed class MainForm : Form
                 MessageBox.Show(
                     this,
                     "Este perfil ya tiene una sesión preparada.\n\n" +
-                    "¿Quieres volver a identificarte para renovar la sesión o cambiar la cuenta de Garmin asociada?",
+                    "¿Quieres renovar la sesión de esta cuenta? Para utilizar otra cuenta, crea otro perfil desde «Personas».",
                     "Volver a iniciar sesión",
                     MessageBoxButtons.YesNo,
                     MessageBoxIcon.Question) != DialogResult.Yes)
@@ -1105,9 +1095,8 @@ internal sealed class MainForm : Form
                 throw new InvalidOperationException("No se recibió una lista nueva de Garmin.");
             }
 
-            var activities = RecentActivityReader.Read(refreshedListPath);
-            if (activities.Count == 0)
-                throw new InvalidOperationException("Garmin no devolvió actividades recientes.");
+            var activities = RecentActivityReader.ReadValidatedCatalog(
+                refreshedListPath, startDate, endDate);
             File.Move(refreshedListPath, listPath, overwrite: true);
             return activities;
         }
@@ -1419,6 +1408,8 @@ internal sealed class MainForm : Form
         startInfo.Environment["PYTHONUNBUFFERED"] = "1";
         backend.ApplySafePythonEnvironment(startInfo.Environment);
         startInfo.ArgumentList.Add(backend.ScriptPath);
+        if (_capabilities?.Supports("--events") == true)
+            startInfo.ArgumentList.Add("--events");
         return startInfo;
     }
 
@@ -1452,7 +1443,49 @@ internal sealed class MainForm : Form
     private async Task PumpOutputAsync(StreamReader reader)
     {
         while (await reader.ReadLineAsync() is { } line)
+        {
+            if (line.StartsWith(BackendEvent.Prefix, StringComparison.Ordinal))
+            {
+                if (BackendEvent.TryParse(line, out var backendEvent) && backendEvent is not null)
+                    ApplyBackendEvent(backendEvent);
+                continue;
+            }
             AppendLog(RedactLocalPaths(TranslateVisibleLogLine(line)));
+        }
+    }
+
+    internal void ClearProfilePresentation()
+    {
+        _verifiedSessionProfileId = null;
+        _lastOutputFiles = [];
+        _selectedActivityId = null;
+        _selectedActivityDate = null;
+        _activityId.Clear();
+        _selectedActivity.Text = "Aún no has elegido una actividad.";
+        _logBox.Clear();
+        _openFileButton.Enabled = false;
+        _status.Text = "Perfil cambiado. Sus datos y archivos permanecen separados.";
+    }
+
+    private void ApplyBackendEvent(BackendEvent value)
+    {
+        if (IsDisposed || Disposing) return;
+        if (InvokeRequired) { BeginInvoke(() => ApplyBackendEvent(value)); return; }
+        if (value.Event is "phase" or "progress")
+        {
+            _status.Text = $"{TranslateVisibleLogLine(value.Phase)}: {value.Completed}/{value.Total}";
+            if (value.Total > 0)
+            {
+                _progress.Style = ProgressBarStyle.Blocks;
+                _progress.Value = (int)Math.Clamp(100L * value.Completed / value.Total, 0, 100);
+            }
+        }
+        else if (value.Event == "error")
+        {
+            _status.Text = value.Status == "partial"
+                ? $"{TranslateVisibleLogLine(value.Phase)}: faltan datos; el informe se marcará como parcial."
+                : "La operación no se completó. Revisa el registro.";
+        }
     }
 
     private static string TranslateVisibleLogLine(string line)
@@ -1520,7 +1553,7 @@ internal sealed class MainForm : Form
         }
     }
 
-    private void SetRunningState(
+    internal void SetRunningState(
         bool running,
         string? status = null,
         bool cancelable = false)
@@ -1585,7 +1618,7 @@ internal sealed class MainForm : Form
         return new ExportDiscovery([], false, []);
     }
 
-    private static ExportDiscovery? ReadManifest(
+    internal static ExportDiscovery? ReadManifest(
         string manifestPath,
         string outputDirectory,
         DateTime startedAtUtc,
@@ -2297,7 +2330,7 @@ internal sealed class MainForm : Form
         public override string ToString() => Text;
     }
 
-    private sealed record ExportDiscovery(
+    internal sealed record ExportDiscovery(
         List<string> Files,
         bool IsPartial,
         List<string> ErrorSections);

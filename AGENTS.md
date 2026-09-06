@@ -26,6 +26,13 @@ El esquema compacto actual es `3.3.1`.
 |---|---|
 | `garmin_export.py` | Autenticación, consultas, caché, orquestación y CLI |
 | `training_analysis.py` | Modelo semántico, métricas, privacidad y XLSX |
+| `semantic_common.py`, `cardiac_analysis.py` | Normalizadores compartidos y análisis con cobertura temporal |
+| `export_privacy.py`, `export_io.py` | Auditoría, referencias privadas y escritura atómica |
+| `export_cache.py`, `garmin_transport.py` | Caché, regulación de cada solicitud HTTP y registros seguros |
+| `xlsx_report.py`, `xlsx_constants.py`, `text_output.py` | Presentaciones XLSX y TXT sin serialización descartada |
+| `export_events.py` | Eventos de progreso versionados para el lanzador |
+| `GarminDataExport.Tests/` | Pruebas sin red del lanzador y contratos C#/Python |
+| `Directory.Build.props`, `backend-modules.txt` | Versión única y módulos del paquete portable |
 | `GarminDataExport.csproj` | Capa .NET de consola que conserva el diseño original |
 | `GarminDataExport.Launcher/` | Asistente gráfico WinForms en español |
 | `GarminDataExport.Launcher/Services/UpdateChecker.cs` | Consulta y compara la última Release pública |
@@ -367,6 +374,10 @@ tokens.
   carpeta de salida independientes.
 - Nunca reautenticar silenciosamente un perfil con variables de otra persona.
 - Nunca mover o copiar automáticamente una sesión antigua.
+- Verificar la cuenta mediante `.account_binding.json` y su HMAC antes de
+  reutilizar caché o guardar nuevos tokens. Una cuenta distinta requiere otro
+  perfil; si la migración no puede confirmar al propietario, falla sin reasignar
+  los datos. Nunca incluir esa huella ni el identificador de cuenta en informes.
 
 Rutas del lanzador:
 
@@ -397,6 +408,8 @@ corto y nunca incluye datos de Garmin. Un fallo debe ser silencioso durante la
 comprobación automática y no puede impedir usar la aplicación.
 
 El aviso automático se muestra una sola vez por cada etiqueta nueva. La
+marca de último intento se guarda también si falla la conexión para respetar
+las 24 horas; una consulta manual puede forzar el reintento. La
 aplicación nunca descarga, sustituye ni ejecuta actualizaciones por sí sola.
 Debe explicar que perfiles, sesión, anotaciones y caché permanecen bajo
 `%LOCALAPPDATA%\GarminDataExportLauncher`, y los informes en Documentos, por lo
@@ -421,6 +434,10 @@ La lista global de zapatillas, bicicletas y sus estadísticas tiene una
 vigencia de 7 días. Si el refresco falla, se conserva la última entrada
 completa y se vuelve a intentar en la ejecución siguiente.
 
+El perfil deportivo caduca a los 7 días y los objetivos/récords a las 24 horas.
+Sus refrescos fallidos conservan la última sección completa y una marca de
+reintento. Todas las escrituras de caché sustituyen el archivo de forma atómica.
+
 Cada archivo de caché utiliza un sobre interno de versión 2 con una marca de
 integridad. Una entrada diaria guarda además las claves confirmadas. Los
 resultados de llamadas fallidas nunca se consideran completos: se reintentan
@@ -440,6 +457,9 @@ incluyen inicio y fin.
 - Nutrición: hasta 4 días, tres llamadas por día.
 - Actividades: secuenciales.
 - Todas las llamadas pasan por un único `RateLimiter` con `threading.Lock`.
+- La regulación ocurre en el transporte HTTP, incluyendo páginas internas,
+  redirecciones y renovación OAuth. Cada 429, incluido el segundo intento,
+  renueva la barrera; no se permiten reintentos ocultos del adaptador HTTP.
 
 La espera base es 0,15 s. Un 429 duplica gradualmente la espera, establece una
 barrera global de 60 s para todos los hilos y reintenta una vez. Cada 250
@@ -546,13 +566,14 @@ capturar una ventana asociada a un perfil real.
 ## Validación antes de entregar
 
 ```powershell
-.\.venv\Scripts\python.exe -m py_compile garmin_export.py training_analysis.py
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-dotnet restore GarminDataExport.slnx
-dotnet build GarminDataExport.slnx --no-restore
-dotnet run --project GarminDataExport.csproj -- --help
-.\scripts\Build-PortableRelease.ps1 -Version 3.7.0
+.\scripts\Validate-Project.ps1
+.\scripts\Build-PortableRelease.ps1
 ```
+
+El script común compila .NET antes de ejecutar Python porque los contratos
+serializan modelos C# reales. La versión sale de `Directory.Build.props`.
+El constructor instala el lock con `--require-hashes` y valida recursivamente
+los nombres fuente de todos los `.pyc`. CI y Release usan esa validación común.
 
 También:
 

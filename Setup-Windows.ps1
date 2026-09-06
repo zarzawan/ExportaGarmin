@@ -111,18 +111,21 @@ if (-not $pythonExe) {
 Write-Host "Python encontrado: $pythonExe" -ForegroundColor Green
 
 $dotnetExe = Find-DotNet
-$hasDotNet10 = $false
+$requiredSdk = (Get-Content -LiteralPath (Join-Path $projectRoot 'global.json') -Raw | ConvertFrom-Json).sdk.version
+$sdkPattern = '^' + [regex]::Escape($requiredSdk) + '\s'
+$hasRequiredSdk = $false
 if ($dotnetExe) {
     $installedSdks = & $dotnetExe --list-sdks
-    $hasDotNet10 = [bool]($installedSdks -match '^10\.')
+    $hasRequiredSdk = [bool]($installedSdks -match $sdkPattern)
 }
 
-if (-not $hasDotNet10) {
+if (-not $hasRequiredSdk) {
     Require-Winget
-    Write-Host 'Instalando el SDK estable de .NET 10 LTS...' -ForegroundColor Yellow
+    Write-Host "Instalando el SDK de .NET $requiredSdk exigido por el proyecto..." -ForegroundColor Yellow
 
     winget install `
         --id Microsoft.DotNet.SDK.10 `
+        --version $requiredSdk `
         --exact `
         --source winget `
         --accept-source-agreements `
@@ -137,8 +140,8 @@ if (-not $hasDotNet10) {
     }
 }
 $installedSdks = & $dotnetExe --list-sdks
-if ($LASTEXITCODE -ne 0 -or -not [bool]($installedSdks -match '^10\.')) {
-    throw 'El SDK de .NET 10 todavía no está disponible. Reinicia el PC y ejecuta de nuevo Instalar.bat.'
+if ($LASTEXITCODE -ne 0 -or -not [bool]($installedSdks -match $sdkPattern)) {
+    throw "El SDK exacto $requiredSdk todavía no está disponible. Instala esa versión y ejecuta de nuevo Instalar.bat."
 }
 Write-Host ".NET encontrado: $dotnetExe" -ForegroundColor Green
 
@@ -179,7 +182,7 @@ if (-not (Test-Python311Executable -Executable $venvPython)) {
 }
 
 Write-Host 'Instalando las dependencias comprobadas de Python...' -ForegroundColor Yellow
-& $venvPython -m pip install -r (Join-Path $projectRoot 'requirements-windows-lock.txt')
+& $venvPython -m pip install --require-hashes --only-binary=:all: -r (Join-Path $projectRoot 'requirements-windows-lock.txt')
 if ($LASTEXITCODE -ne 0) {
     throw "No se pudieron instalar las dependencias de Python. Código de error: $LASTEXITCODE."
 }

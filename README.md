@@ -46,7 +46,7 @@ Necesitas Windows 11, conexión a Internet y una cuenta de Garmin Connect.
 
 1. Abre la página
    [Última versión de ExportaGarmin](https://github.com/zarzawan/ExportaGarmin/releases/latest).
-2. En **Assets**, descarga `ExportaGarmin-3.7.0-Windows-x64.zip`.
+2. En **Assets**, descarga `ExportaGarmin-3.8.0-Windows-x64.zip`.
 3. No descargues **Source code**: esos enlaces son para programadores.
 4. Abre la carpeta **Descargas**.
 5. Pulsa con el botón derecho sobre el ZIP y elige **Extraer todo**.
@@ -82,11 +82,11 @@ La descarga incluye un archivo `.sha256`. Para comprobar su integridad, abre
 PowerShell dentro de Descargas y ejecuta:
 
 ```powershell
-Get-FileHash .\ExportaGarmin-3.7.0-Windows-x64.zip -Algorithm SHA256
+Get-FileHash .\ExportaGarmin-3.8.0-Windows-x64.zip -Algorithm SHA256
 ```
 
 El resultado debe coincidir con el contenido de
-`ExportaGarmin-3.7.0-Windows-x64.zip.sha256`.
+`ExportaGarmin-3.8.0-Windows-x64.zip.sha256`.
 
 </details>
 
@@ -278,6 +278,11 @@ el nombre de la actividad y un resumen del comentario para que sea fácil
 distinguirlas. La cuadrícula también conserva el día de la semana y la fecha
 junto a la actividad.
 
+El campo **Buscar** localiza anotaciones por fecha, actividad, objetivo o
+comentario. Los botones de página permiten consultar todo el historial, en
+grupos de 100 anotaciones. También puedes guardar un día de descanso sin
+vincularlo a una actividad.
+
 Si falta una sesión reciente, pulsa **Actualizar actividades** dentro del
 diario. El programa consulta Garmin y renueva la lista de los últimos 90 días
 hasta hoy. Esta acción solo actualiza el catálogo para elegir actividades; no
@@ -436,6 +441,12 @@ Las exportaciones nunca intentan renovar una sesión con credenciales heredadas
 de `.env` o de otra persona. Si una sesión caduca, el programa pide iniciar
 sesión expresamente en ese perfil.
 
+Cada perfil se vincula a una cuenta de Garmin mediante una huella privada.
+Renueva la sesión con esa misma cuenta; para otra persona, crea otro perfil
+desde **Personas**. Al actualizar, se comprueba la sesión o el perfil guardado
+antes de reutilizar datos. Si no puede confirmarse el propietario anterior,
+el programa conserva sus archivos y pide utilizar otro perfil.
+
 Para una separación real frente a otras personas que usan el mismo ordenador,
 lo más seguro es crear una cuenta distinta de Windows para cada una.
 
@@ -553,25 +564,34 @@ datos privados. No es el recomendado para subir a una IA.
 
 ## Desarrollo y comprobaciones
 
-Para trabajar con el código fuente se necesitan Python 3.11 y el SDK de
-.NET 10 LTS. `Instalar.bat` prepara ese entorno técnico y compila
+Para trabajar con el código fuente se necesitan Python 3.11 y la versión
+exacta del SDK de .NET indicada en `global.json`. `Instalar.bat` prepara ese entorno técnico y compila
 `ExportaGarmin.exe`; no forma parte de la instalación normal de una Release.
 
 ```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests -v
-dotnet restore GarminDataExport.slnx
-dotnet build GarminDataExport.slnx --no-restore
+.\scripts\Validate-Project.ps1
 ```
 
 Crear localmente la misma descarga portable que publica GitHub:
 
 ```powershell
-.\scripts\Build-PortableRelease.ps1 -Version 3.7.0
+.\scripts\Build-PortableRelease.ps1 -Version 3.8.0
 ```
 
 El resultado queda en `artifacts\` e incluye el ZIP y su SHA-256. GitHub
 Actions ejecuta las pruebas y genera estos archivos automáticamente al
 publicar una etiqueta de versión.
+
+`Directory.Build.props` es la fuente de la versión de la aplicación. El
+constructor comprueba que la etiqueta coincide y usa el mismo script de
+validación que CI: compila ambos lenguajes, ejecuta pruebas sin red y verifica
+los contratos reales de diario y catálogo entre C# y Python. Las dependencias
+Windows se instalan con hashes obligatorios desde el lock. El backend portable
+se compila desde `backend-modules.txt` con nombres fuente sin rutas personales.
+
+El modo completo por CLI puede conservar las últimas N actividades aunque
+sean anteriores al intervalo de salud diaria. En el compacto, las actividades
+y todos los cálculos del informe se limitan al intervalo indicado.
 
 Dependencias principales:
 

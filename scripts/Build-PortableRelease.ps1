@@ -1,7 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-    [ValidatePattern('^\d+\.\d+\.\d+([.-][0-9A-Za-z.-]+)?$')]
-    [string]$Version = '3.7.0',
+    [string]$Version,
 
     [string]$OutputDirectory,
 
@@ -15,6 +14,12 @@ Set-StrictMode -Version Latest
 $env:DOTNET_CLI_TELEMETRY_OPTOUT = '1'
 
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+[xml]$versionProperties = Get-Content -LiteralPath (Join-Path $projectRoot 'Directory.Build.props')
+$declaredVersion = [string]$versionProperties.Project.PropertyGroup.ExportaGarminVersion
+if ([string]::IsNullOrWhiteSpace($Version)) { $Version = $declaredVersion }
+if ($Version -notmatch '^\d+\.\d+\.\d+$' -or $Version -cne $declaredVersion) {
+    throw 'La versión debe coincidir con Directory.Build.props.'
+}
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $projectRoot 'artifacts'
 }
@@ -108,22 +113,6 @@ function Assert-Python311 {
     }
 }
 
-function Assert-ApplicationVersion {
-    [xml]$project = Get-Content -LiteralPath (
-        Join-Path $projectRoot `
-            'GarminDataExport.Launcher\GarminDataExport.Launcher.csproj')
-    $declared = [string]$project.Project.PropertyGroup[0].Version
-    if (-not [string]::Equals(
-            $declared,
-            $Version,
-            [StringComparison]::Ordinal)) {
-        throw (
-            "La versión solicitada ($Version) no coincide con el proyecto " +
-            "($declared)."
-        )
-    }
-}
-
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
 New-Item -ItemType Directory -Path $cacheRoot -Force | Out-Null
 Remove-SafeDirectory -Path $packageRoot
@@ -135,23 +124,9 @@ New-Item -ItemType Directory -Path $publishRoot -Force | Out-Null
 
 $builderPythonExe = Resolve-BuilderPython
 Assert-Python311 -Executable $builderPythonExe
-Assert-ApplicationVersion
 
 if (-not $SkipTests) {
-    Invoke-Checked `
-        -Executable $builderPythonExe `
-        -Arguments @(
-            '-m', 'py_compile',
-            (Join-Path $projectRoot 'garmin_export.py'),
-            (Join-Path $projectRoot 'training_analysis.py')) `
-        -FailureMessage 'La compilación de Python ha fallado.'
-    Invoke-Checked `
-        -Executable $builderPythonExe `
-        -Arguments @(
-            '-m', 'unittest', 'discover',
-            '-s', (Join-Path $projectRoot 'tests'),
-            '-v') `
-        -FailureMessage 'Las pruebas de Python han fallado.'
+    & (Join-Path $PSScriptRoot 'Validate-Project.ps1') -PythonPath $builderPythonExe
 }
 
 Invoke-Checked `
@@ -276,6 +251,7 @@ Invoke-Checked `
         '--disable-pip-version-check',
         '--no-compile',
         '--no-deps',
+        '--require-hashes',
         '--only-binary=:all:',
         '--requirement',
         (Join-Path $projectRoot 'requirements-windows-lock.txt'),
@@ -285,17 +261,10 @@ Invoke-Checked `
 
 $applicationRoot = Join-Path $packageRoot 'app'
 New-Item -ItemType Directory -Path $applicationRoot -Force | Out-Null
-foreach ($file in @('garmin_export.py', 'training_analysis.py')) {
-    $compiledName = [IO.Path]::GetFileNameWithoutExtension($file) + '.pyc'
-    Invoke-Checked `
-        -Executable $builderPythonExe `
-        -Arguments @(
-            '-c',
-            'import py_compile,sys;py_compile.compile(sys.argv[1],cfile=sys.argv[2],doraise=True)',
-            (Join-Path $projectRoot $file),
-            (Join-Path $applicationRoot $compiledName)) `
-        -FailureMessage "No se pudo compilar $file para la descarga."
-}
+Invoke-Checked `
+    -Executable $builderPythonExe `
+    -Arguments @((Join-Path $PSScriptRoot 'Compile-Backend.py'), $applicationRoot) `
+    -FailureMessage 'No se pudo compilar y validar el backend portable.'
 foreach ($file in @(
         'README.md',
         'LEEME_PRIMERO.txt',

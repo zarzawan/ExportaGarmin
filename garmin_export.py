@@ -35,6 +35,20 @@ from pathlib import Path
 from typing import Any, Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from garmin_transport import RateLimiter, configure_private_logging, regulate_transport
+from export_cache import ExportCache, _CACHE_FORMAT_VERSION, _CACHE_ENVELOPE_KEY
+from text_output import TextOutput
+from export_events import EventEmitter
+
+_events = EventEmitter()
+from profile_binding import ProfileBindingError, has_binding, has_profile_data, verify_account
+
+# La sesión siempre se elige explícitamente; garth no debe cargar otra por entorno.
+for _garth_variable in ("GARTH_HOME", "GARTH_TOKEN"):
+    os.environ.pop(_garth_variable, None)
+os.environ["GARTH_TELEMETRY"] = "false"
+configure_private_logging()
+
 from garth.exc import GarthHTTPError
 
 from garminconnect import (
@@ -47,6 +61,7 @@ from garminconnect import (
 from training_analysis import (
     SCHEMA_VERSION,
     activity_catalog_entry,
+    activity_catalog_document,
     atomic_write_json,
     atomic_write_text,
     build_quality_report,
@@ -67,79 +82,11 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger("garmin_export")
-logging.getLogger("garminconnect").setLevel(logging.WARNING)
 
 
 # ---------------------------------------------------------------------------
 # Regulador adaptativo: reacciona a los 429 y es seguro entre hilos.
 # ---------------------------------------------------------------------------
-class RateLimiter:
-    """Regula llamadas y solo reduce el ritmo cuando Garmin lo solicita."""
-
-    def __init__(self, base_delay: float = 0.15):
-        self.base_delay = base_delay
-        self.current_delay = base_delay
-        self.call_count = 0
-        self.last_call = 0.0
-        self.blocked_until = 0.0
-        self.consecutive_ok = 0
-        self._lock = threading.Lock()
-
-    def wait(self):
-        preventive_pause_pending = False
-        while True:
-            with self._lock:
-                now = time.monotonic()
-                if preventive_pause_pending:
-                    wait_for = self.blocked_until - now
-                    if wait_for <= 0:
-                        self.last_call = now
-                        return
-                else:
-                    wait_for = max(
-                        self.blocked_until - now,
-                        self.current_delay - (now - self.last_call),
-                    )
-                if wait_for <= 0:
-                    self.last_call = now
-                    self.call_count += 1
-                    if self.call_count % 250 == 0:
-                        log.info(
-                            "  Pausa de seguridad después de "
-                            f"{self.call_count} llamadas a la API..."
-                        )
-                        self.blocked_until = max(
-                            self.blocked_until,
-                            now + 2,
-                        )
-                        preventive_pause_pending = True
-                    else:
-                        return
-            time.sleep(max(wait_for, 0.01))
-
-    def on_success(self):
-        with self._lock:
-            self.consecutive_ok += 1
-            if self.consecutive_ok > 10 and self.current_delay > self.base_delay:
-                self.current_delay = max(self.base_delay, self.current_delay * 0.9)
-
-    def on_rate_limit(self):
-        with self._lock:
-            self.consecutive_ok = 0
-            self.current_delay = min(self.current_delay * 2, 10.0)
-            self.blocked_until = max(
-                self.blocked_until,
-                time.monotonic() + 60,
-            )
-            log.warning(
-                "  Límite de Garmin alcanzado: nueva espera "
-                f"{self.current_delay:.1f}s; pausando 60s todos los hilos..."
-            )
-
-    def on_error(self):
-        with self._lock:
-            self.consecutive_ok = 0
-            self.current_delay = min(self.current_delay * 1.2, 5.0)
 
 
 _limiter = RateLimiter()
@@ -177,22 +124,21 @@ def _safe_call_with_status(fn, *args, label: str = "", **kwargs):
 
 def _exception_http_status(exc: Exception) -> Optional[int]:
     """Obtiene un código HTTP sin serializar la excepción ni su URL."""
-    response = getattr(exc, "response", None)
-    status = getattr(response, "status_code", None)
-    if status is None:
-        wrapped_error = getattr(exc, "error", None)
-        status = getattr(
-            getattr(wrapped_error, "response", None),
-            "status_code",
-            None,
-        )
-    if status is None and getattr(exc, "__cause__", None) is not None:
-        status = getattr(
-            getattr(exc.__cause__, "response", None),
-            "status_code",
-            None,
-        )
-    return status if isinstance(status, int) else None
+    pending = [exc]
+    seen = set()
+    while pending and len(seen) < 16:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        status = getattr(getattr(current, "response", None), "status_code", None)
+        if isinstance(status, int) and not isinstance(status, bool) and 100 <= status <= 599:
+            return status
+        for key in ("error", "__cause__", "__context__"):
+            child = getattr(current, key, None)
+            if child is not None:
+                pending.append(child)
+    return None
 
 
 def _safe_exception_reason(exc: Exception) -> str:
@@ -216,6 +162,13 @@ def safe_call(fn, *args, label: str = "", **kwargs) -> Optional[Any]:
     """Llama a Garmin con regulación adaptativa y control de errores."""
     endpoint = _safe_endpoint_name(fn)
     _safe_call_state.failed = False
+    if getattr(getattr(fn, "__self__", None), "_export_transport_regulated", False) is True:
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:
+            log.warning("  Fallo de %s: %s", endpoint, _safe_exception_reason(exc))
+            _report_safe_call_failure(endpoint, exc)
+            return None
     _limiter.wait()
     try:
         result = fn(*args, **kwargs)
@@ -233,7 +186,10 @@ def safe_call(fn, *args, label: str = "", **kwargs) -> Optional[Any]:
                 f"  El reintento de {endpoint} ha fallado: "
                 f"{_safe_exception_reason(e)}"
             )
-            _limiter.on_error()
+            if isinstance(e, GarminConnectTooManyRequestsError) or _exception_http_status(e) == 429:
+                _limiter.on_rate_limit()
+            else:
+                _limiter.on_error()
             _report_safe_call_failure(endpoint, e)
             return None
     except GarthHTTPError as e:
@@ -250,17 +206,15 @@ def safe_call(fn, *args, label: str = "", **kwargs) -> Optional[Any]:
                     f"  El reintento de {endpoint} ha fallado: "
                     f"{_safe_exception_reason(retry_error)}"
                 )
-                _limiter.on_error()
+                if isinstance(retry_error, GarminConnectTooManyRequestsError) or _exception_http_status(retry_error) == 429:
+                    _limiter.on_rate_limit()
+                else:
+                    _limiter.on_error()
                 _report_safe_call_failure(endpoint, retry_error)
                 return None
-        if status in (400, 404):
-            log.debug(f"  {endpoint} no está disponible ({status})")
-        else:
-            log.warning(
-                f"  Fallo de {endpoint}: {_safe_exception_reason(e)}"
-            )
-            _limiter.on_error()
-            _report_safe_call_failure(endpoint, e)
+        log.warning(f"  Fallo de {endpoint}: {_safe_exception_reason(e)}")
+        _limiter.on_error()
+        _report_safe_call_failure(endpoint, e)
         return None
     except Exception as e:
         log.warning(
@@ -348,6 +302,7 @@ def authenticate(
     use_credential_environment: bool = True,
     interactive: bool = True,
     force_login: bool = False,
+    cache_dir: Optional[Path] = None,
 ) -> Garmin:
     """Autentica en Garmin Connect.
 
@@ -362,13 +317,34 @@ def authenticate(
     """
     tokenstore_path = Path(tokenstore).expanduser()
 
+    def new_client(**kwargs):
+        return regulate_transport(Garmin(**kwargs), lambda: _limiter)
+
+    if cache_dir is not None and force_login and not has_binding(cache_dir):
+        if tokenstore_path.exists():
+            try:
+                previous = new_client()
+                previous.login(str(tokenstore_path))
+                verify_account(previous, cache_dir, trusted_existing_session=True)
+            except ProfileBindingError:
+                raise
+            except Exception:
+                if has_profile_data(cache_dir):
+                    raise ProfileBindingError(
+                        "No se pudo comprobar la cuenta anterior. Conserva sus datos y crea otro perfil desde «Personas»."
+                    ) from None
+
     # Paso 1: probar tokens guardados sin solicitar credenciales.
     if tokenstore_path.exists() and not force_login:
         try:
-            garmin = Garmin()
+            garmin = new_client()
             garmin.login(str(tokenstore_path))
+            if cache_dir is not None:
+                verify_account(garmin, cache_dir, trusted_existing_session=True)
             log.info("Sesión iniciada con los tokens guardados")
             return garmin
+        except ProfileBindingError:
+            raise
         except (FileNotFoundError, GarthHTTPError, GarminConnectAuthenticationError,
                 GarminConnectConnectionError) as e:
             log.info(f"Los tokens guardados han caducado o no son válidos ({type(e).__name__}); hace falta iniciar sesión")
@@ -415,7 +391,7 @@ def authenticate(
         sys.exit(1)
 
     log.info("Iniciando sesión en Garmin Connect...")
-    garmin = Garmin(email=email, password=password, is_cn=False, return_on_mfa=True)
+    garmin = new_client(email=email, password=password, is_cn=False, return_on_mfa=True)
 
     max_attempts = 3
     for attempt in range(1, max_attempts + 1):
@@ -429,7 +405,7 @@ def authenticate(
             # Permitir que se vuelvan a escribir para el siguiente intento.
             email = input("  Correo de Garmin: ").strip()
             password = getpass("  Contraseña de Garmin: ")
-            garmin = Garmin(email=email, password=password, is_cn=False, return_on_mfa=True)
+            garmin = new_client(email=email, password=password, is_cn=False, return_on_mfa=True)
         except GarminConnectConnectionError as e:
             log.error("Error de conexión: no se pudo contactar con Garmin. Comprueba Internet.")
             log.debug(f"Tipo de fallo: {_safe_exception_reason(e)}")
@@ -440,7 +416,7 @@ def authenticate(
                 sys.exit(1)
             email = input("  Correo de Garmin: ").strip()
             password = getpass("  Contraseña de Garmin: ")
-            garmin = Garmin(email=email, password=password, is_cn=False, return_on_mfa=True)
+            garmin = new_client(email=email, password=password, is_cn=False, return_on_mfa=True)
 
     if result1 == "needs_mfa":
         print()
@@ -448,12 +424,13 @@ def authenticate(
         garmin.resume_login(result2, mfa_code)
 
     # Guardar tokens para las siguientes ejecuciones.
+    if cache_dir is not None:
+        verify_account(garmin, cache_dir)
     tokenstore_path.mkdir(parents=True, exist_ok=True)
     _persist_auth_tokens(garmin, tokenstore_path)
     log.info("Sesión iniciada: tokens guardados en la carpeta de sesión elegida")
     log.info("   (Las próximas ejecuciones utilizarán los tokens automáticamente)")
     return garmin
-
 
 
 # ---------------------------------------------------------------------------
@@ -3474,6 +3451,8 @@ def _timezone_metadata(timezone_name, period_end, current=None):
 
 
 def _section(md: list, title: str, data, level: int = 3):
+    if getattr(md, "enabled", True) is False:
+        return
     """Añade un bloque JSON con título; omite valores nulos."""
     if data is None:
         return
@@ -3514,213 +3493,6 @@ def _chunked_date_call(fn, start: date, end: date, label: str, chunk_days: int =
 # ---------------------------------------------------------------------------
 # Caché para reanudar exportaciones interrumpidas sin repetir el trabajo.
 # ---------------------------------------------------------------------------
-_CACHE_ENVELOPE_KEY = "__garmin_export_cache__"
-_CACHE_FORMAT_VERSION = 2
-
-
-class ExportCache:
-    """Caché JSON para respuestas diarias, actividades y secciones.
-
-    Se guarda en {output_dir}/.cache/ y utiliza fechas o identificadores como
-    claves. Los datos históricos permanecen entre ejecuciones.
-    """
-
-    def __init__(
-        self,
-        out_dir: Path,
-        enabled: bool = True,
-        cache_dir: Optional[Path] = None,
-    ):
-        self.enabled = enabled
-        self.cache_dir = (
-            Path(cache_dir)
-            if cache_dir is not None
-            else out_dir / ".cache"
-        )
-        self.daily_dir = self.cache_dir / "daily"
-        self.activity_dir = self.cache_dir / "activities"
-        self.section_dir = self.cache_dir / "sections"
-        self.hits = 0
-        self.misses = 0
-
-        if not enabled:
-            return
-
-        self.daily_dir.mkdir(parents=True, exist_ok=True)
-        self.activity_dir.mkdir(parents=True, exist_ok=True)
-        self.section_dir.mkdir(parents=True, exist_ok=True)
-
-        existing_files = list(self.daily_dir.glob("*.json"))
-        daily_health = sum(1 for f in existing_files if f.name[0].isdigit())
-        daily_hydration = sum(1 for f in existing_files if f.name.startswith("hydration_"))
-        daily_nutrition = sum(1 for f in existing_files if f.name.startswith("nutrition_"))
-        existing_acts = len(list(self.activity_dir.glob("*.json")))
-        existing_sects = len(list(self.section_dir.glob("*.json")))
-        total = len(existing_files) + existing_acts + existing_sects
-        if total:
-            parts = []
-            if daily_health:
-                parts.append(f"{daily_health} días de salud")
-            if daily_hydration:
-                parts.append(f"{daily_hydration} días de hidratación")
-            if daily_nutrition:
-                parts.append(f"{daily_nutrition} días de nutrición")
-            if existing_acts:
-                parts.append(f"{existing_acts} actividades")
-            if existing_sects:
-                parts.append(f"{existing_sects} secciones")
-            log.info(f"Caché: {', '.join(parts)}")
-
-    def _wipe(self):
-        """Elimina la caché antigua."""
-        import shutil
-        if self.cache_dir.exists():
-            shutil.rmtree(self.cache_dir, ignore_errors=True)
-
-    def _read_entry(
-        self,
-        path: Path,
-        *,
-        accept_legacy: bool,
-    ) -> tuple[Optional[dict], set[str], bool]:
-        """Lee una entrada y separa sus datos de los metadatos de integridad."""
-        if not self.enabled:
-            return None, set(), False
-        if path.exists():
-            try:
-                raw = json.loads(path.read_text(encoding="utf-8"))
-                if not isinstance(raw, dict):
-                    raise ValueError("La entrada de caché no es un objeto.")
-                envelope = raw.get(_CACHE_ENVELOPE_KEY)
-                if isinstance(envelope, dict):
-                    payload = raw.get("data")
-                    if (
-                        envelope.get("version") != _CACHE_FORMAT_VERSION
-                        or not isinstance(payload, dict)
-                    ):
-                        self.misses += 1
-                        return None, set(), False
-                    complete_keys = {
-                        str(key)
-                        for key in envelope.get("complete_keys", [])
-                        if isinstance(key, str)
-                    }
-                    if envelope.get("complete") is False:
-                        self.misses += 1
-                        return None, complete_keys, False
-                    self.hits += 1
-                    return payload, complete_keys, True
-                if accept_legacy:
-                    # Los datos se conservan, pero ninguna clave se considera
-                    # verificada: la primera ejecución con v3 la actualizará.
-                    self.hits += 1
-                    return raw, set(), False
-            except (json.JSONDecodeError, OSError, ValueError):
-                pass
-        self.misses += 1
-        return None, set(), False
-
-    @staticmethod
-    def _write_entry(
-        path: Path,
-        data: dict,
-        *,
-        complete: bool,
-        complete_keys: Optional[set[str]] = None,
-    ) -> None:
-        """Escribe una entrada con una marca explícita de integridad."""
-        keys = complete_keys if complete_keys is not None else set(data)
-        envelope = {
-            _CACHE_ENVELOPE_KEY: {
-                "version": _CACHE_FORMAT_VERSION,
-                "complete": bool(complete),
-                "complete_keys": sorted(str(key) for key in keys),
-            },
-            "data": data,
-        }
-        path.write_text(
-            json.dumps(envelope, default=str, ensure_ascii=False),
-            encoding="utf-8",
-        )
-
-    def get_day_entry(self, ds: str) -> tuple[Optional[dict], set[str]]:
-        """Devuelve los datos diarios y las claves confirmadas por Garmin."""
-        if not self.enabled:
-            return None, set()
-        path = self.daily_dir / f"{ds}.json"
-        data, complete_keys, _ = self._read_entry(
-            path,
-            accept_legacy=True,
-        )
-        return data, complete_keys
-
-    def get_day(self, ds: str) -> Optional[dict]:
-        """Compatibilidad: devuelve únicamente los datos de una entrada diaria."""
-        data, _ = self.get_day_entry(ds)
-        return data
-
-    def put_day(
-        self,
-        ds: str,
-        data: dict,
-        *,
-        complete_keys: Optional[set[str]] = None,
-    ):
-        if not self.enabled:
-            return
-        path = self.daily_dir / f"{ds}.json"
-        keys = complete_keys if complete_keys is not None else set(data)
-        self._write_entry(
-            path,
-            data,
-            complete=True,
-            complete_keys=keys,
-        )
-
-    def get_activity(self, activity_id) -> Optional[dict]:
-        if not self.enabled:
-            return None
-        path = self.activity_dir / f"{activity_id}.json"
-        data, _, _ = self._read_entry(path, accept_legacy=False)
-        return data
-
-    def put_activity(self, activity_id, data: dict, *, complete: bool = True):
-        if not self.enabled:
-            return
-        path = self.activity_dir / f"{activity_id}.json"
-        self._write_entry(path, data, complete=complete)
-
-    def get_section(self, name: str) -> Optional[dict]:
-        """Obtiene de caché una sección completa."""
-        if not self.enabled:
-            return None
-        path = self.section_dir / f"{name}.json"
-        data, _, _ = self._read_entry(path, accept_legacy=False)
-        return data
-
-    def section_needs_refresh(self, name: str, max_age_days: int) -> bool:
-        """Indica si una sección no existe o ha superado su vigencia."""
-        if not self.enabled:
-            return True
-        path = self.section_dir / f"{name}.json"
-        try:
-            age_seconds = max(0.0, time.time() - path.stat().st_mtime)
-        except OSError:
-            return True
-        return age_seconds >= timedelta(days=max_age_days).total_seconds()
-
-    def put_section(self, name: str, data: dict, *, complete: bool = True):
-        if not self.enabled:
-            return
-        path = self.section_dir / f"{name}.json"
-        self._write_entry(path, data, complete=complete)
-
-    def summary(self) -> str:
-        total = self.hits + self.misses
-        if total == 0:
-            return "Caché: sin consultas"
-        pct = (self.hits / total) * 100
-        return f"Caché: {self.hits} reutilizados, {self.misses} nuevos ({pct:.0f}% reutilizado)"
 
 
 # ---------------------------------------------------------------------------
@@ -3774,7 +3546,7 @@ class GarminExporter:
         self.endpoint_failures: set[tuple[str, str, str]] = set()
         self._endpoint_failure_events = 0
         self._endpoint_failures_lock = threading.Lock()
-        self.md: list[str] = []
+        self.md: list[str] = TextOutput(enabled=output_format != "xlsx")
         self.semantic_model: dict[str, Any] = {}
         self.written_files: list[Path] = []
         self.sensitive_identifiers: set[str] = set()
@@ -4570,7 +4342,9 @@ class GarminExporter:
             self.md.append(f"  {i}. {name} -- {desc}")
         self.md.append("")
 
-        for name, fn in sections:
+        for section_index, (name, fn) in enumerate(sections):
+            _events.emit("phase", phase=name, completed=section_index, total=len(sections))
+            section_failures_before = self._endpoint_failure_count()
             log.info(f"Exportando {name}...")
             _set_safe_call_failure_handler(
                 lambda endpoint, reason, section=name:
@@ -4585,12 +4359,14 @@ class GarminExporter:
                     fn()
                     log.info(f"  Completado: {name}")
                 except KeyboardInterrupt:
+                    _events.emit("error", phase=name, status="partial")
                     log.info(f"\n  Interrumpido durante {name}; se guardará la exportación parcial")
                     self.errors.append(
                         f"{name}: interrumpido por la persona usuaria (datos parciales)"
                     )
                     break
                 except Exception as e:
+                    _events.emit("error", phase=name, status="partial")
                     reason = _safe_exception_reason(e)
                     self.errors.append(f"{name}: fallo técnico ({reason})")
                     log.error(f"  Fallo en {name}: {reason}")
@@ -4600,6 +4376,8 @@ class GarminExporter:
                     )
             finally:
                 _set_safe_call_failure_handler(None)
+                if self._endpoint_failure_count() > section_failures_before:
+                    _events.emit("error", phase=name, status="partial")
 
         if self.errors:
             self.md.append("\nErrores durante la exportación\n")
@@ -4698,6 +4476,7 @@ class GarminExporter:
                 },
             )
 
+        _events.emit("result", status="partial" if self._is_partial() else "completed", completed=len(written), total=len(written))
         log.info(f"Llamadas a la API: {_limiter.call_count}")
         log.info(self.cache.summary())
         if self._is_partial():
@@ -4920,7 +4699,8 @@ class GarminExporter:
             "schema_version": _COMPACT_SCHEMA_VERSION,
         }
         self._remember_compact("export_metadata", metadata)
-        self.md.append(_json({"export_metadata": metadata}))
+        if self.output_format != "xlsx":
+            self.md.append(_json({"export_metadata": metadata}))
         self.md.append("")
 
     # ===================================================================
@@ -4928,7 +4708,7 @@ class GarminExporter:
     # ===================================================================
     def export_profile(self):
         cached = self.cache.get_section("profile")
-        if cached is not None and not self.update_mode:
+        if cached is not None and not self.update_mode and not self.cache.section_needs_refresh("profile", 7):
             data = cached
         else:
             failures_before_cache = self._endpoint_failure_count()
@@ -4942,7 +4722,7 @@ class GarminExporter:
             data["device_alarms"] = safe_call(self.api.get_device_alarms, label="device_alarms")
             data["last_used_device"] = safe_call(self.api.get_device_last_used, label="last_used_device")
             data["activity_types"] = safe_call(self.api.get_activity_types, label="activity_types")
-            self.cache.put_section(
+            data = self.cache.put_refreshable_section(
                 "profile",
                 data,
                 complete=(
@@ -4965,7 +4745,8 @@ class GarminExporter:
                 'números de serie, URLs, alarmas, capacidades y catálogos."\n'
             )
             self._remember_compact("profile", profile)
-            self.md.append(f"{_json({'profile': profile})}\n")
+            if self.output_format != "xlsx":
+                self.md.append(f"{_json({'profile': profile})}\n")
         else:
             self.md.append("\nProfile\n")
             for title, key in [("Nombre completo", "full_name"), ("Sistema de unidades", "unit_system"),
@@ -5164,6 +4945,7 @@ class GarminExporter:
 
             # Informar del progreso con más frecuencia al principio.
             done = i + 1
+            _events.emit("progress", phase="Daily Health", completed=done, total=self.days)
             report_interval = 5 if done <= 25 else 25
             if done % report_interval == 0 or done == 1 or done == self.days:
                 elapsed = time.time() - t_start
@@ -5191,7 +4973,8 @@ class GarminExporter:
                     'de bienestar de alta frecuencia, campos duplicados y catálogos de '
                     'hábitos no registrados. La falta de sueño o VFC aparece en Data Quality."\n'
                 )
-                self.md.append(f"{_json(all_days)}\n")
+                if self.output_format != "xlsx":
+                    self.md.append(f"{_json(all_days)}\n")
                 if any(
                     day.get("sleep", {}).get("sleep_need_s") is not None
                     for day in all_days
@@ -5248,7 +5031,8 @@ class GarminExporter:
                 'Schema: "Solo mediciones reales con valores sistólico y diastólico; '
                 'el intervalo consultado no se trata como dato de salud."\n'
             )
-            self.md.append(f"{_json({'measurements': measurements})}\n")
+            if self.output_format != "xlsx":
+                self.md.append(f"{_json({'measurements': measurements})}\n")
         else:
             self.md.append("\nBlood Pressure\n")
             if data is None:
@@ -5279,6 +5063,21 @@ class GarminExporter:
                     self.start_date.isoformat(), self.today.isoformat(), "",
                     label="activities_by_date",
                 ) or []
+
+        if _compact_mode:
+            in_scope = []
+            for activity in activities:
+                if not isinstance(activity, dict):
+                    self._quality_add("warnings", "Se omitió una actividad con formato no válido.")
+                    continue
+                try:
+                    activity_day = date.fromisoformat(str(activity.get("startTimeLocal", ""))[:10])
+                except ValueError:
+                    self._quality_add("warnings", "Se omitió una actividad sin fecha válida para el periodo.")
+                    continue
+                if self.start_date <= activity_day <= self.today:
+                    in_scope.append(activity)
+            activities = in_scope
 
         if self.selected_activity_ref:
             selected = str(self.selected_activity_ref)
@@ -5501,6 +5300,7 @@ class GarminExporter:
                 _section(self.md, "Detalle de las series temporales", act_data.get("details"), 4)
 
             done = i + 1
+            _events.emit("progress", phase="Activities", completed=done, total=len(activities))
             if done % 10 == 0 or done == len(activities):
                 elapsed = time.time() - t_start
                 if done > cached_acts:
@@ -5524,7 +5324,8 @@ class GarminExporter:
                     'track, ubicaciones y fuente original dependen del modo de privacidad; '
                     'las métricas deportivas derivadas se conservan siempre."\n'
                 )
-                self.md.append(f"{_json(all_activities)}\n")
+                if self.output_format != "xlsx":
+                    self.md.append(f"{_json(all_activities)}\n")
                 self._quality_add(
                     "duplicate_sources_removed",
                     "Las vueltas usan splits.lapDTOs y typed_splits.splits solo como alternativa.",
@@ -5587,9 +5388,10 @@ class GarminExporter:
                 'Schema: "Mediciones únicas del intervalo. Peso, masa muscular y masa '
                 'ósea de Garmin se convierten de gramos a kilogramos."\n'
             )
-            self.md.append(
-                f"{_json({'measurements': measurements})}\n"
-            )
+            if self.output_format != "xlsx":
+                self.md.append(
+                    f"{_json({'measurements': measurements})}\n"
+                )
             self._quality_add(
                 "unit_conversions",
                 "Peso, masa muscular y masa ósea: gramos de Garmin convertidos a kilogramos.",
@@ -5667,7 +5469,8 @@ class GarminExporter:
                 'anterior, fotografía actual posterior o sin fecha. Se eliminan '
                 'identidad e identificadores de dispositivos."\n'
             )
-            self.md.append(f"{_json(compact_data)}\n")
+            if self.output_format != "xlsx":
+                self.md.append(f"{_json(compact_data)}\n")
             for snapshot in snapshots:
                 message = (
                     f"{snapshot['metric']} se separó como current_snapshot "
@@ -5698,7 +5501,7 @@ class GarminExporter:
         self.md.append("\nGoals and Records\n")
 
         cached = self.cache.get_section("goals")
-        if cached is not None and not self.update_mode:
+        if cached is not None and not self.update_mode and not self.cache.section_needs_refresh("goals", 1):
             data = cached
         else:
             failures_before_cache = self._endpoint_failure_count()
@@ -5707,7 +5510,7 @@ class GarminExporter:
             data["badges"] = safe_call(self.api.get_earned_badges, label="badges")
             data["active_goals"] = safe_call(self.api.get_goals, "active", 0, 100, label="active_goals")
             data["past_goals"] = safe_call(self.api.get_goals, "past", 0, 100, label="past_goals")
-            self.cache.put_section(
+            data = self.cache.put_refreshable_section(
                 "goals",
                 data,
                 complete=(
@@ -5726,7 +5529,8 @@ class GarminExporter:
                 'Schema: "Récords personales y objetivos activos reducidos. Se omiten '
                 'insignias y objetivos pasados en las exportaciones semanales para IA."\n'
             )
-            self.md.append(f"{_json(compact_data or {})}\n")
+            if self.output_format != "xlsx":
+                self.md.append(f"{_json(compact_data or {})}\n")
         else:
             _section(self.md, "Récords personales", data.get("personal_records"))
             _section(self.md, "Insignias conseguidas", data.get("badges"))
@@ -5779,7 +5583,8 @@ class GarminExporter:
         if _compact_mode:
             compact_data = {k: v for k, v in data.items() if k != "bb_range"}
             self.md.append('Schema: "daily_steps, weekly_steps (52 semanas), weekly_stress (52 semanas), weekly_im (minutos de intensidad), floors, progress_distance, progress_duration, progress_elevationGain y progress_calories."\n')
-            self.md.append(f"{_json(compact_data)}\n")
+            if self.output_format != "xlsx":
+                self.md.append(f"{_json(compact_data)}\n")
         else:
             _section(self.md, "Pasos diarios", data.get("daily_steps"))
             _section(self.md, "Pasos semanales (52 semanas)", data.get("weekly_steps"))
@@ -5829,7 +5634,8 @@ class GarminExporter:
             _section_nodata(self.md, "Golf")
         elif _compact_mode:
             self.md.append('Schema: "summary: lista de rondas. scorecards: matriz {_id, detail, shots} con los datos de cada ronda."\n')
-            self.md.append(f"{_json(data)}\n")
+            if self.output_format != "xlsx":
+                self.md.append(f"{_json(data)}\n")
         else:
             _section(self.md, "Resumen de golf", data.get("summary"))
             for sc in data.get("scorecards", []):
@@ -5959,7 +5765,8 @@ class GarminExporter:
                 'marca como user_provided. Se excluyen IDs reales, valores '
                 'predeterminados, datos de dispositivos y campos técnicos."\n'
             )
-            self.md.append(f"{_json({'gear': gear})}\n")
+            if self.output_format != "xlsx":
+                self.md.append(f"{_json({'gear': gear})}\n")
         else:
             self.md.append("\nGear\n")
             if not data.get("gear_list"):
@@ -6014,7 +5821,8 @@ class GarminExporter:
             _section_nodata(self.md, "Training Plans")
         elif _compact_mode:
             self.md.append('Schema: "plans: lista de planes de entrenamiento. plan_details: matriz {_id, detail} con el detalle de cada plan."\n')
-            self.md.append(f"{_json(data)}\n")
+            if self.output_format != "xlsx":
+                self.md.append(f"{_json(data)}\n")
         else:
             _section(self.md, "Training Plans", data.get("plans"))
             for p in data.get("plan_details", []):
@@ -6059,7 +5867,8 @@ class GarminExporter:
             _section_nodata(self.md, "Workouts")
         elif _compact_mode:
             self.md.append('Schema: "workout_list: definiciones de entrenamientos guardados. workout_details: matriz {_id, detail} con el detalle de cada entrenamiento."\n')
-            self.md.append(f"{_json(data)}\n")
+            if self.output_format != "xlsx":
+                self.md.append(f"{_json(data)}\n")
         else:
             _section(self.md, "Lista de entrenamientos", data.get("workout_list"))
             for w in data.get("workout_details", []):
@@ -6155,7 +5964,8 @@ class GarminExporter:
                     'Schema: "Solo fechas con ingesta real, ingesta durante actividad '
                     'o pérdida de sudor. El objetivo diario no cuenta como consumo."\n'
                 )
-                self.md.append(f"{_json(all_days)}\n")
+                if self.output_format != "xlsx":
+                    self.md.append(f"{_json(all_days)}\n")
         else:
             has_data = False
             for ds in days_list:
@@ -6278,7 +6088,8 @@ class GarminExporter:
                     'Schema: "Solo fechas con alimentos registrados. Se omiten '
                     'contenedores de comidas, objetivos y ajustes diarios repetidos."\n'
                 )
-                self.md.append(f"{_json(all_days)}\n")
+                if self.output_format != "xlsx":
+                    self.md.append(f"{_json(all_days)}\n")
         else:
             has_data = False
             for ds in days_list:
@@ -6303,9 +6114,10 @@ class GarminExporter:
             'Schema: "Calculado únicamente con Activities y Daily Health de esta '
             'exportación. Las actividades nunca se cuentan desde el bienestar diario."\n'
         )
-        self.md.append(
-            f"{_json(_weekly_summary(self.compact_activities, self.compact_daily_records))}\n"
-        )
+        if self.output_format != "xlsx":
+            self.md.append(
+                f"{_json(_weekly_summary(self.compact_activities, self.compact_daily_records))}\n"
+            )
 
     def export_data_quality(self):
         if not _compact_mode:
@@ -6322,7 +6134,8 @@ class GarminExporter:
             'Schema: "Limitaciones, datos críticos ausentes, clasificación temporal, '
             'unidades, filtros de privacidad y eliminación de duplicados."\n'
         )
-        self.md.append(f"{_json({'data_quality': self.data_quality})}\n")
+        if self.output_format != "xlsx":
+            self.md.append(f"{_json({'data_quality': self.data_quality})}\n")
 
     # ===================================================================
     # Salud femenina
@@ -6364,7 +6177,8 @@ class GarminExporter:
             _section_nodata(self.md, "Women's Health")
         elif _compact_mode:
             self.md.append('Schema: "pregnancy: resumen del seguimiento del embarazo. menstrual_calendar: historial de ciclos. Estas funciones deben activarse en Garmin."\n')
-            self.md.append(f"{_json(data)}\n")
+            if self.output_format != "xlsx":
+                self.md.append(f"{_json(data)}\n")
         else:
             _section(self.md, "Resumen del embarazo", data.get("pregnancy"))
             _section(self.md, "Calendario menstrual", data.get("menstrual_calendar"))
@@ -6547,6 +6361,7 @@ Inicio de sesión:
         help="Comprobar los tokens guardados sin pedir credenciales y salir",
     )
     parser.add_argument("--verbose", action="store_true", help="Mostrar información técnica detallada")
+    parser.add_argument("--events", action="store_true", help="Emitir eventos estructurados de progreso (protocolo 1)")
 
     args = parser.parse_args()
 
@@ -6666,10 +6481,10 @@ Inicio de sesión:
     except ValueError as exc:
         parser.error(f"--timezone: {exc}")
 
-    if args.verbose:
-        logging.getLogger().setLevel(logging.DEBUG)
+    configure_private_logging(args.verbose)
 
-    global _limiter, _compact_mode, _split_mode, _update_mode
+    global _limiter, _compact_mode, _split_mode, _update_mode, _events
+    _events = EventEmitter(args.events)
     _limiter = RateLimiter(base_delay=args.delay)
     _update_mode = args.update
     _split_mode = args.split
@@ -6695,7 +6510,11 @@ Inicio de sesión:
             use_credential_environment=not args.ignore_credential_env,
             interactive=not args.non_interactive_auth,
             force_login=args.force_login,
+            cache_dir=Path(args.cache_dir) if args.cache_dir else Path(args.output) / ".cache",
         )
+    except ProfileBindingError as exc:
+        log.error("%s", exc)
+        sys.exit(1)
     except GarminConnectTooManyRequestsError:
         log.error("Demasiadas solicitudes. Espera unos minutos y vuelve a intentarlo.")
         sys.exit(1)
@@ -6735,30 +6554,27 @@ Inicio de sesión:
             explicit_start_date
             or catalog_end - timedelta(days=max(args.days - 1, 0))
         )
-        activities = safe_call(
+        activities, catalog_succeeded = _safe_call_with_status(
             api.get_activities_by_date,
             catalog_start.isoformat(),
             catalog_end.isoformat(),
             None,
             label="activity_catalog",
-        ) or []
+        )
+        if not catalog_succeeded or not isinstance(activities, list) or any(not isinstance(item, dict) for item in activities):
+            log.error("No se recibió un catálogo válido de Garmin. La lista anterior se conserva.")
+            sys.exit(1)
         secret = load_or_create_reference_secret(cache.cache_dir)
-        catalog = [
-            activity_catalog_entry(activity, secret)
-            for activity in activities
-            if isinstance(activity, dict)
-        ]
-        catalog.sort(key=lambda item: item.get("date", ""), reverse=True)
+        try:
+            catalog_document = activity_catalog_document(activities, secret, catalog_start, catalog_end)
+        except ValueError:
+            log.error("El catálogo recibido contiene actividades no válidas. La lista anterior se conserva.")
+            sys.exit(1)
         atomic_write_json(
             Path(args.list_activities),
-            {
-                "schema_version": _COMPACT_SCHEMA_VERSION,
-                "start_date": catalog_start.isoformat(),
-                "end_date": catalog_end.isoformat(),
-                "activities": catalog,
-            },
+            catalog_document,
         )
-        log.info(f"Catálogo privado creado: {len(catalog)} actividades")
+        log.info("Catálogo privado creado: %s actividades", len(catalog_document["activities"]))
         sys.exit(0)
 
     exporter = GarminExporter(api, out, args.days, args.activities,
@@ -6792,4 +6608,9 @@ Inicio de sesión:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        _events.emit("error", status="failed")
+        log.error("La operación no se completó (%s). Revisa el registro y vuelve a intentarlo.", _safe_exception_reason(exc))
+        sys.exit(1)

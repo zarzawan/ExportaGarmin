@@ -6,6 +6,27 @@ namespace GarminDataExport.Launcher.Services;
 
 internal static class RecentActivityReader
 {
+    public static IReadOnlyList<RecentActivity> ReadValidatedCatalog(
+        string path, DateTime start, DateTime end)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("status", out var status) || status.GetString() != "completed" ||
+            !root.TryGetProperty("start_date", out var first) || first.GetString() != start.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ||
+            !root.TryGetProperty("end_date", out var last) || last.GetString() != end.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture) ||
+            !root.TryGetProperty("activities", out var array) || array.ValueKind != JsonValueKind.Array)
+            throw new InvalidDataException("No se recibió un catálogo completo para el periodo solicitado.");
+        var activities = Read(path);
+        if (activities.Count != array.GetArrayLength() ||
+            activities.Select(item => item.Id).Distinct(StringComparer.Ordinal).Count() != activities.Count ||
+            activities.Any(item => !DateTime.TryParseExact(item.Date, "yyyy-MM-dd",
+                System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None,
+                out var day) || day < start.Date || day > end.Date))
+            throw new InvalidDataException("El catálogo contiene actividades no válidas.");
+        return activities;
+    }
+
     public static IReadOnlyList<RecentActivity> Read(string path)
     {
         if (!File.Exists(path))
